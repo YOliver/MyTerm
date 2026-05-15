@@ -12,7 +12,7 @@ MainWindow
 │   ├── QPushButton ("浏览") — 弹出 QFileDialog.getExistingDirectory
 │   └── QPushButton ("启动")
 └── TerminalWidget (自绘 QWidget，填满剩余空间)
-    ├── pyte.Screen    — 终端状态（字符网格、光标、颜色）
+    ├── pyte.screens.HistoryScreen — 终端状态（字符网格、光标、颜色、回滚历史）
     ├── pyte.Stream    — ANSI 转义序列解析器
     ├── wcwidth        — 检测 CJK 双宽字符
     └── pywinpty.PtyProcess — Windows ConPTY 封装
@@ -49,6 +49,9 @@ MainWindow
 - QComboBox: 下拉展示历史路径（最近10条），不可手动编辑
 - "浏览" 按钮: 调用 QFileDialog.getExistingDirectory 选择目录
 - 浏览选中的路径自动加入历史并刷新下拉列表
+- SmoothComboBox 动画: 下拉抽屉效果（setMask 裁剪方案），180ms OutCubic
+- 白边修复: QFrame 容器设 NoFrame、QListView 设 viewportMargins(0,0,0,0)
+- 展开定位: scrollToTop + 容器重定位到路径框底部，不受当前选中项影响
 
 ### Path History
 - Store: JSON file at project root (path_history.json)
@@ -62,6 +65,8 @@ MainWindow
 - Support: foreground/background ANSI colors, bold, blink cursor
 - CJK wide chars: detect with wcwidth.wcwidth(), draw 2× cell width, skip placeholder column
 - Cursor: blinking solid rectangle at screen.cursor position
+- Scrollback: pyte.screens.HistoryScreen (history=2000), history.top deque + buffer 联合渲染
+- wheelEvent: 鼠标滚轮上下翻阅历史，scroll_offset 追踪偏移量，新输出自动回底
 
 ### IME Input (优化需求)
 - WA_InputMethodEnabled attribute

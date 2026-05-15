@@ -10,23 +10,25 @@ DEFAULT_FG = QColor(192, 192, 192)
 DEFAULT_BG = QColor(12, 12, 12)
 CURSOR_COLOR = QColor(255, 255, 255)
 
-ANSI_COLORS = {
-    0:  QColor(12, 12, 12),
-    1:  QColor(197, 15, 31),
-    2:  QColor(19, 161, 14),
-    3:  QColor(193, 156, 0),
-    4:  QColor(0, 55, 218),
-    5:  QColor(136, 23, 152),
-    6:  QColor(58, 150, 221),
-    7:  QColor(204, 204, 204),
-    8:  QColor(118, 118, 118),
-    9:  QColor(231, 72, 86),
-    10: QColor(22, 198, 12),
-    11: QColor(249, 241, 165),
-    12: QColor(59, 120, 255),
-    13: QColor(180, 0, 158),
-    14: QColor(97, 214, 214),
-    15: QColor(242, 242, 242),
+NAMED_COLORS = {
+    "black":   QColor(12, 12, 12),
+    "red":     QColor(197, 15, 31),
+    "green":   QColor(19, 161, 14),
+    "brown":   QColor(193, 156, 0),
+    "blue":    QColor(0, 55, 218),
+    "magenta": QColor(136, 23, 152),
+    "cyan":    QColor(58, 150, 221),
+    "white":   QColor(204, 204, 204),
+    "brightblack":   QColor(118, 118, 118),
+    "brightred":     QColor(231, 72, 86),
+    "brightgreen":   QColor(22, 198, 12),
+    "brightbrown":   QColor(249, 241, 165),
+    "brightblue":    QColor(59, 120, 255),
+    "brightmagenta": QColor(180, 0, 158),
+    "brightcyan":    QColor(97, 214, 214),
+    "brightwhite":   QColor(242, 242, 242),
+    # pyte has a typo in BG_AIXTERM[105]
+    "bfightmagenta": QColor(180, 0, 158),
 }
 
 
@@ -124,15 +126,24 @@ class TerminalWidget(QWidget):
                     fg = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
                     bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
 
+                    if char.reverse:
+                        fg, bg = bg, fg
+
                     painter.fillRect(x, y, cell_width, self._char_height, bg)
                     painter.setPen(fg)
-                    if char.bold:
+                    if char.bold or char.italics:
                         f = QFont(self._font)
-                        f.setBold(True)
+                        if char.bold:
+                            f.setBold(True)
+                        if char.italics:
+                            f.setItalic(True)
                         painter.setFont(f)
                     painter.drawText(x, y + self._fm.ascent(), char.data)
-                    if char.bold:
+                    if char.bold or char.italics:
                         painter.setFont(self._font)
+                    if char.underscore:
+                        painter.drawLine(x, y + self._char_height - 1,
+                                         x + cell_width, y + self._char_height - 1)
                     col += max(w, 1)
                 else:
                     painter.fillRect(x, y, self._char_width, self._char_height, DEFAULT_BG)
@@ -157,8 +168,16 @@ class TerminalWidget(QWidget):
         self.update()
 
     def _to_qcolor(self, color_str):
-        if color_str in ANSI_COLORS:
-            return ANSI_COLORS[color_str]
+        if color_str in NAMED_COLORS:
+            return NAMED_COLORS[color_str]
+        if len(color_str) == 6:
+            try:
+                r = int(color_str[0:2], 16)
+                g = int(color_str[2:4], 16)
+                b = int(color_str[4:6], 16)
+                return QColor(r, g, b)
+            except ValueError:
+                pass
         return DEFAULT_FG
 
     def inputMethodEvent(self, event):
