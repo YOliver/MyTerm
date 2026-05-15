@@ -1,0 +1,5 @@
+__pycache__/
+.pytest_cache/
+path_history.json
+WindTerm-master/
+.claude/
