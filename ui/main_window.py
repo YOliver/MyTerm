@@ -19,12 +19,18 @@ class SmoothComboBox(QComboBox):
         if not popup or not popup.isVisible():
             return
 
-        # 消除 QFrame 容器和 QListView 默认边距产生的白边
+        # 始终从顶部展开：先滚到顶部，再修正容器位置到路径框正下方
+        popup.scrollToTop()
         container = popup.parent()
         if container:
             from PySide6.QtWidgets import QFrame
             container.setFrameShape(QFrame.Shape.NoFrame)
             container.setStyleSheet("background: #252526;")
+            # 强制容器顶部对齐路径框底部
+            combo_bottom = self.mapToGlobal(self.rect().bottomLeft())
+            geo = container.geometry()
+            geo.moveTop(combo_bottom.y())
+            container.setGeometry(geo)
         popup.setViewportMargins(0, 0, 0, 0)
 
         from PySide6.QtGui import QRegion
