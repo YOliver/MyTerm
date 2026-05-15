@@ -11,7 +11,7 @@ from ui.terminal_widget import TerminalWidget
 
 
 class SmoothComboBox(QComboBox):
-    """下拉抽屉动画 — 用 setMask 裁剪，不碰几何属性避免定位漂移"""
+    """下拉抽屉动画 — setMask 裁剪，不碰几何属性避免定位漂移"""
 
     def showPopup(self):
         super().showPopup()
@@ -19,8 +19,15 @@ class SmoothComboBox(QComboBox):
         if not popup or not popup.isVisible():
             return
 
+        # 消除 QFrame 容器和 QListView 默认边距产生的白边
+        container = popup.parent()
+        if container:
+            from PySide6.QtWidgets import QFrame
+            container.setFrameShape(QFrame.Shape.NoFrame)
+            container.setStyleSheet("background: #252526;")
+        popup.setViewportMargins(0, 0, 0, 0)
+
         from PySide6.QtGui import QRegion
-        from PySide6.QtCore import QRect
 
         w = popup.width()
         h = popup.height()
@@ -75,7 +82,7 @@ class MainWindow(QMainWindow):
             "  background: #252526; color: #ccc;"
             "  selection-background-color: #094771; selection-color: #fff;"
             "  border: 1px solid #555; border-radius: 4px;"
-            "  padding: 4px; outline: none;"
+            "  outline: none;"
             "}"
             "QComboBox QAbstractItemView::item {"
             "  padding: 6px 10px; border-radius: 3px; min-height: 26px;"
