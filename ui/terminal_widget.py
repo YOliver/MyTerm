@@ -1,6 +1,7 @@
 from PySide6.QtWidgets import QWidget
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
 from PySide6.QtCore import Qt, QTimer
+from pyte.screens import HistoryScreen
 import pyte
 import wcwidth
 
@@ -33,13 +34,14 @@ class TerminalWidget(QWidget):
     def __init__(self, backend, parent=None):
         super().__init__(parent)
         self._backend = backend
-        self._screen = pyte.Screen(80, 24)
+        self._screen = HistoryScreen(80, 24, history=2000)
         self._stream = pyte.Stream(self._screen)
         self._font = QFont("Consolas", 14)
         self._fm = QFontMetrics(self._font)
         self._char_width = self._fm.horizontalAdvance("A")
         self._char_height = self._fm.height()
         self._cursor_visible = True
+        self._scroll_offset = 0
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
@@ -70,6 +72,7 @@ class TerminalWidget(QWidget):
 
     def _on_data(self, data):
         self._stream.feed(data)
+        self._scroll_offset = 0
         self.update()
 
     def _on_exit(self, exit_code):
@@ -85,12 +88,29 @@ class TerminalWidget(QWidget):
         painter = QPainter(self)
         painter.setFont(self._font)
 
-        for row in range(self._screen.lines):
-            y = row * self._char_height
+        history = self._screen.history.top
+        history_len = len(history)
+        visible_rows = self._screen.lines
+        total = history_len + visible_rows
+
+        max_offset = max(0, total - visible_rows)
+        if self._scroll_offset > max_offset:
+            self._scroll_offset = max_offset
+
+        start = max(0, total - visible_rows - self._scroll_offset)
+        end = total - self._scroll_offset
+
+        for idx in range(start, end):
+            screen_row = idx - start
+            y = screen_row * self._char_height
             if y > self.height():
                 break
 
-            line = self._screen.buffer.get(row, {})
+            if idx < history_len:
+                line = history[idx]
+            else:
+                line = self._screen.buffer.get(idx - history_len, {})
+
             col = 0
             while col < self._screen.columns:
                 x = col * self._char_width
@@ -118,12 +138,23 @@ class TerminalWidget(QWidget):
                     painter.fillRect(x, y, self._char_width, self._char_height, DEFAULT_BG)
                     col += 1
 
-        if self._cursor_visible and self._screen.cursor.hidden == False:
+        if self._cursor_visible and self._scroll_offset == 0 and not self._screen.cursor.hidden:
             cx = self._screen.cursor.x * self._char_width
             cy = self._screen.cursor.y * self._char_height
             painter.fillRect(cx, cy, self._char_width, self._char_height, CURSOR_COLOR)
 
         painter.end()
+
+    def wheelEvent(self, event):
+        delta = event.angleDelta().y()
+        lines = max(1, abs(delta) // 120)
+        history_len = len(self._screen.history.top)
+        max_offset = max(0, history_len)
+        if delta > 0:
+            self._scroll_offset = max(0, self._scroll_offset - lines)
+        else:
+            self._scroll_offset = min(max_offset, self._scroll_offset + lines)
+        self.update()
 
     def _to_qcolor(self, color_str):
         if color_str in ANSI_COLORS:
