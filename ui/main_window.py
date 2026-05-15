@@ -1,12 +1,39 @@
 import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QComboBox, QPushButton, QMessageBox, QFileDialog
+    QComboBox, QPushButton, QMessageBox, QFileDialog,
+    QAbstractItemView,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QVariantAnimation, QEasingCurve, QAbstractAnimation
 from store.path_history import PathHistory
 from backend.terminal_backend import TerminalBackend
 from ui.terminal_widget import TerminalWidget
+
+
+class SmoothComboBox(QComboBox):
+    """下拉抽屉动画 — 用 setMask 裁剪，不碰几何属性避免定位漂移"""
+
+    def showPopup(self):
+        super().showPopup()
+        popup = self.findChild(QAbstractItemView)
+        if not popup or not popup.isVisible():
+            return
+
+        from PySide6.QtGui import QRegion
+        from PySide6.QtCore import QRect
+
+        w = popup.width()
+        h = popup.height()
+
+        anim = QVariantAnimation()
+        anim.setDuration(180)
+        anim.setStartValue(2)
+        anim.setEndValue(h)
+        anim.setEasingCurve(QEasingCurve.OutCubic)
+        anim.valueChanged.connect(lambda v: popup.setMask(QRegion(0, 0, w, v)))
+        anim.finished.connect(popup.clearMask)
+        anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+        self._anim = anim
 
 
 class MainWindow(QMainWindow):
@@ -32,13 +59,45 @@ class MainWindow(QMainWindow):
         topbar_layout.setContentsMargins(8, 8, 8, 8)
         topbar_layout.setSpacing(6)
 
-        self._path_combo = QComboBox()
+        self._path_combo = SmoothComboBox()
         self._path_combo.setMinimumWidth(300)
+        self._path_combo.setMinimumHeight(30)
         self._path_combo.setStyleSheet(
-            "QComboBox { font-family: Consolas; font-size: 13px; padding: 4px 8px; "
-            "border: 1px solid #555; border-radius: 3px; background: #1e1e1e; color: #ccc; }"
-            "QComboBox QAbstractItemView { background: #1e1e1e; color: #ccc; "
-            "selection-background-color: #094771; }"
+            "QComboBox {"
+            "  font-family: Consolas; font-size: 13px;"
+            "  padding: 5px 10px;"
+            "  border: 1px solid #555; border-radius: 4px;"
+            "  background: #1e1e1e; color: #ccc;"
+            "}"
+            "QComboBox:hover { border-color: #777; }"
+            "QComboBox:focus { border-color: #0e639c; }"
+            "QComboBox QAbstractItemView {"
+            "  background: #252526; color: #ccc;"
+            "  selection-background-color: #094771; selection-color: #fff;"
+            "  border: 1px solid #555; border-radius: 4px;"
+            "  padding: 4px; outline: none;"
+            "}"
+            "QComboBox QAbstractItemView::item {"
+            "  padding: 6px 10px; border-radius: 3px; min-height: 26px;"
+            "}"
+            "QComboBox QAbstractItemView::item:hover {"
+            "  background: #2a2d2e;"
+            "}"
+            "QComboBox QAbstractItemView::item:selected {"
+            "  background: #094771;"
+            "}"
+            "QScrollBar:vertical {"
+            "  width: 6px; background: #1e1e1e; border-radius: 3px;"
+            "}"
+            "QScrollBar::handle:vertical {"
+            "  background: #555; border-radius: 3px; min-height: 20px;"
+            "}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
+            "  height: 0;"
+            "}"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
+            "  background: none;"
+            "}"
         )
         self._load_history()
         topbar_layout.addWidget(self._path_combo, 1)
