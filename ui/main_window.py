@@ -128,10 +128,12 @@ class MainWindow(QMainWindow):
             "  background: none;"
             "}"
         )
+        self._path_combo.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._load_history()
         topbar_layout.addWidget(self._path_combo, 1)
 
         self._shell_combo = SmoothComboBox()
+        self._shell_combo.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._shell_combo.setMinimumWidth(130)
         self._shell_combo.setMinimumHeight(30)
         self._shell_combo.setStyleSheet(
@@ -175,6 +177,7 @@ class MainWindow(QMainWindow):
         topbar_layout.addWidget(self._shell_combo)
 
         browse_btn = QPushButton("浏览")
+        browse_btn.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         browse_btn.setFixedHeight(30)
         browse_btn.setStyleSheet(
             "QPushButton { font-size: 13px; padding: 0 16px; "
@@ -185,6 +188,7 @@ class MainWindow(QMainWindow):
         topbar_layout.addWidget(browse_btn)
 
         self._launch_btn = QPushButton("启动")
+        self._launch_btn.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._launch_btn.setFixedHeight(30)
         self._launch_btn.setStyleSheet(
             "QPushButton { font-size: 13px; padding: 0 20px; "

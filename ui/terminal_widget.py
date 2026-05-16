@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import Qt, QTimer, QEvent
 from pyte.screens import HistoryScreen
 import pyte
 import wcwidth
@@ -238,6 +238,12 @@ class TerminalWidget(QWidget):
             from PySide6.QtCore import QRectF
             return QRectF(cx, cy, self._char_width, self._char_height)
         return None
+
+    def event(self, event):
+        if event.type() == QEvent.Type.KeyPress:
+            self.keyPressEvent(event)
+            return True
+        return super().event(event)
 
     def keyPressEvent(self, event):
         text = event.text()
