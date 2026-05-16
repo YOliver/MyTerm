@@ -317,6 +317,15 @@ class TerminalWidget(QWidget):
         return abs_row, col
 
     def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.RightButton:
+            if self._sel_start is not None:
+                text = self._get_selected_text()
+                if text:
+                    self._backend.write(text)
+                self._sel_start = None
+                self._sel_end = None
+                self.update()
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self._sel_start = self._pos_to_cell(event.pos())
             self._sel_end = None
