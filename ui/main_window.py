@@ -227,7 +227,10 @@ class MainWindow(QMainWindow):
 
         self._history.add(path)
         self._load_history()
-        cmdline = SHELL_PRESETS[self._shell_combo.currentIndex()][1]
+        cmdline = list(SHELL_PRESETS[self._shell_combo.currentIndex()][1])
+        if cmdline[-1] == "claude -r":
+            if not self._has_claude_session(path):
+                cmdline[-1] = "claude"
         self._add_terminal(path, cmdline)
 
     def _add_terminal(self, path, cmdline=None):
@@ -326,6 +329,13 @@ class MainWindow(QMainWindow):
 
         for i, (r, c, rs, cs) in enumerate(spans[count]):
             self._grid.addWidget(tiles[i]["tile"], r, c, rs, cs)
+
+    def _has_claude_session(self, path):
+        # Claude encodes D:\project\MyTerm -> D--project-MyTerm
+        name = path.replace(":\\", "--").replace("\\", "-").replace("/", "-")
+        session_dir = os.path.join(
+            os.path.expanduser("~"), ".claude", "projects", name)
+        return os.path.isdir(session_dir)
 
     def _load_history(self):
         paths = self._history.all()
