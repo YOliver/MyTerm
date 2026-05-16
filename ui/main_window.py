@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QVariantAnimation, QEasingCurve, QAbstractAnimation
+from PySide6.QtGui import QIcon
 from store.path_history import PathHistory
 from backend.terminal_backend import TerminalBackend
 from ui.terminal_widget import TerminalWidget
@@ -58,6 +59,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("MyTerm")
         self.resize(1100, 650)
+
+        icon = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icon.png")
+        if os.path.exists(icon):
+            self.setWindowIcon(QIcon(icon))
 
         self._history = PathHistory()
         self._slots = [None] * MAX_TERMINALS  # each: dict or None
