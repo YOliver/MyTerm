@@ -1,4 +1,4 @@
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
 from PySide6.QtCore import Qt, QTimer
 from pyte.screens import HistoryScreen
@@ -9,6 +9,7 @@ import wcwidth
 DEFAULT_FG = QColor(192, 192, 192)
 DEFAULT_BG = QColor(12, 12, 12)
 CURSOR_COLOR = QColor(255, 255, 255)
+SEL_COLOR = QColor(38, 79, 120)
 
 NAMED_COLORS = {
     "black":   QColor(12, 12, 12),
@@ -44,6 +45,8 @@ class TerminalWidget(QWidget):
         self._char_height = self._fm.height()
         self._cursor_visible = True
         self._scroll_offset = 0
+        self._sel_start = None    # (abs_row, col)
+        self._sel_end = None
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_InputMethodEnabled, True)
@@ -75,6 +78,8 @@ class TerminalWidget(QWidget):
     def _on_data(self, data):
         self._stream.feed(data)
         self._scroll_offset = 0
+        self._sel_start = None
+        self._sel_end = None
         self.update()
 
     def _on_exit(self, exit_code):
@@ -85,6 +90,21 @@ class TerminalWidget(QWidget):
     def _blink_cursor(self):
         self._cursor_visible = not self._cursor_visible
         self.update()
+
+    def _in_selection(self, abs_row, col):
+        """Check if cell (abs_row, col) is within the current selection."""
+        sel_start, sel_end = self._normalize_selection()
+        if sel_start is None:
+            return False
+        sr, sc = sel_start
+        er, ec = sel_end
+        if abs_row < sr or abs_row > er:
+            return False
+        if abs_row == sr and col < sc:
+            return False
+        if abs_row == er and col >= ec:
+            return False
+        return True
 
     def paintEvent(self, event):
         painter = QPainter(self)
@@ -129,6 +149,9 @@ class TerminalWidget(QWidget):
                     if char.reverse:
                         fg, bg = bg, fg
 
+                    if self._in_selection(idx, col):
+                        bg = SEL_COLOR
+
                     painter.fillRect(x, y, cell_width, self._char_height, bg)
                     painter.setPen(fg)
                     if char.bold or char.italics:
@@ -146,7 +169,8 @@ class TerminalWidget(QWidget):
                                          x + cell_width, y + self._char_height - 1)
                     col += max(w, 1)
                 else:
-                    painter.fillRect(x, y, self._char_width, self._char_height, DEFAULT_BG)
+                    bg = SEL_COLOR if self._in_selection(idx, col) else DEFAULT_BG
+                    painter.fillRect(x, y, self._char_width, self._char_height, bg)
                     col += 1
 
         if self._cursor_visible and self._scroll_offset == 0 and not self._screen.cursor.hidden:
@@ -225,7 +249,14 @@ class TerminalWidget(QWidget):
         elif key == Qt.Key.Key_PageDown:
             self._backend.write("\x1b[6~")
         elif modifiers & Qt.KeyboardModifier.ControlModifier:
-            if key == Qt.Key.Key_C:
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                if key == Qt.Key.Key_C:
+                    self._copy_selection()
+                    return
+            elif key == Qt.Key.Key_C:
+                if self._sel_start is not None:
+                    self._copy_selection()
+                    return
                 self._backend.write("\x03")
             elif key == Qt.Key.Key_D:
                 self._backend.write("\x04")
@@ -242,6 +273,117 @@ class TerminalWidget(QWidget):
                 self._backend.write("\x0c")
         elif text and len(text) > 0:
             self._backend.write(text)
+
+    def _abs_row(self):
+        """First visible absolute row index."""
+        history_len = len(self._screen.history.top)
+        visible_rows = self._screen.lines
+        total = history_len + visible_rows
+        return max(0, total - visible_rows - self._scroll_offset)
+
+    def _pos_to_cell(self, pos):
+        """Convert mouse position to (abs_row, col)."""
+        abs_row = self._abs_row() + pos.y() // self._char_height
+        col = pos.x() // self._char_width
+        return abs_row, col
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._sel_start = self._pos_to_cell(event.pos())
+            self._sel_end = None
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._sel_start is not None:
+            self._sel_end = self._pos_to_cell(event.pos())
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton and self._sel_start is not None:
+            if self._sel_end is None:
+                self._sel_end = self._sel_start
+            self.update()
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            row, col = self._pos_to_cell(event.pos())
+            line = self._line_at(row)
+            if line:
+                # Select word: find boundaries
+                start_col = col
+                end_col = col
+                while start_col > 0:
+                    ch = line.get(start_col - 1)
+                    if ch and ch.data and ch.data != " ":
+                        start_col -= 1
+                    else:
+                        break
+                while True:
+                    ch = line.get(end_col)
+                    if ch and ch.data and ch.data != " ":
+                        end_col += 1
+                    else:
+                        break
+                self._sel_start = (row, start_col)
+                self._sel_end = (row, end_col)
+                self.update()
+        super().mouseDoubleClickEvent(event)
+
+    def _line_at(self, abs_row):
+        """Get the dict-like row at the given absolute row index."""
+        history = self._screen.history.top
+        history_len = len(history)
+        if abs_row < history_len:
+            return history[abs_row]
+        return self._screen.buffer.get(abs_row - history_len, {})
+
+    def _normalize_selection(self):
+        """Return (start, end) ordered so start is before end."""
+        if self._sel_start is None:
+            return None, None
+        end = self._sel_end or self._sel_start
+        if self._sel_start[0] < end[0] or (
+            self._sel_start[0] == end[0] and self._sel_start[1] <= end[1]
+        ):
+            return self._sel_start, end
+        return end, self._sel_start
+
+    def _get_selected_text(self):
+        start, end = self._normalize_selection()
+        if start is None:
+            return ""
+        lines = []
+        for row in range(start[0], end[0] + 1):
+            line = self._line_at(row)
+            if not line:
+                lines.append("")
+                continue
+            begin_col = start[1] if row == start[0] else 0
+            finish_col = end[1] if row == end[0] else self._screen.columns
+            chars = []
+            col = begin_col
+            while col < finish_col:
+                ch = line.get(col)
+                if ch and ch.data:
+                    chars.append(ch.data)
+                    # Skip placeholder column for wide chars
+                    w = wcwidth.wcwidth(ch.data[0])
+                    col += max(w, 1)
+                else:
+                    chars.append(" ")
+                    col += 1
+            lines.append("".join(chars).rstrip())
+        return "\r\n".join(lines)
+
+    def _copy_selection(self):
+        text = self._get_selected_text()
+        if text:
+            QApplication.clipboard().setText(text)
+        self._sel_start = None
+        self._sel_end = None
+        self.update()
 
     def set_font_size(self, size):
         self._font = QFont("Consolas", size)
