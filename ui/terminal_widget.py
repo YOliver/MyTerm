@@ -285,8 +285,9 @@ class TerminalWidget(QWidget):
             elif key == Qt.Key.Key_Z:
                 self._backend.write("\x1a")
             elif key == Qt.Key.Key_V:
-                if text:
-                    self._backend.write(text)
+                clipboard = QApplication.clipboard().text()
+                if clipboard:
+                    self._backend.write(clipboard)
             elif key == Qt.Key.Key_A:
                 self._backend.write("\x01")
             elif key == Qt.Key.Key_E:
