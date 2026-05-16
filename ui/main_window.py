@@ -53,6 +53,12 @@ class SmoothComboBox(QComboBox):
 MAX_TERMINALS = 4
 TILE_BORDER = "1px solid #444"
 
+SHELL_PRESETS = [
+    ("<powershell>", ["powershell.exe"]),
+    ("<claude -r>", ["powershell.exe", "-NoExit", "-Command", "claude -r"]),
+    ("<cmd>",        ["cmd.exe"]),
+]
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -125,6 +131,49 @@ class MainWindow(QMainWindow):
         self._load_history()
         topbar_layout.addWidget(self._path_combo, 1)
 
+        self._shell_combo = SmoothComboBox()
+        self._shell_combo.setMinimumWidth(130)
+        self._shell_combo.setMinimumHeight(30)
+        self._shell_combo.setStyleSheet(
+            "QComboBox {"
+            "  font-family: Consolas; font-size: 13px;"
+            "  padding: 5px 8px;"
+            "  border: 1px solid #555; border-radius: 4px;"
+            "  background: #1e1e1e; color: #ccc;"
+            "}"
+            "QComboBox:hover { border-color: #777; }"
+            "QComboBox:focus { border-color: #0e639c; }"
+            "QComboBox QAbstractItemView {"
+            "  background: #252526; color: #ccc;"
+            "  selection-background-color: #094771; selection-color: #fff;"
+            "  border: 1px solid #555; outline: none;"
+            "}"
+            "QComboBox QAbstractItemView::item {"
+            "  padding: 6px 8px; min-height: 24px;"
+            "}"
+            "QComboBox QAbstractItemView::item:hover {"
+            "  background: #2a2d2e;"
+            "}"
+            "QComboBox QAbstractItemView::item:selected {"
+            "  background: #094771;"
+            "}"
+            "QScrollBar:vertical {"
+            "  width: 6px; background: #1e1e1e; border-radius: 3px;"
+            "}"
+            "QScrollBar::handle:vertical {"
+            "  background: #555; border-radius: 3px; min-height: 20px;"
+            "}"
+            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
+            "  height: 0;"
+            "}"
+            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
+            "  background: none;"
+            "}"
+        )
+        for label, _ in SHELL_PRESETS:
+            self._shell_combo.addItem(label)
+        topbar_layout.addWidget(self._shell_combo)
+
         browse_btn = QPushButton("浏览")
         browse_btn.setFixedHeight(30)
         browse_btn.setStyleSheet(
@@ -174,9 +223,10 @@ class MainWindow(QMainWindow):
 
         self._history.add(path)
         self._load_history()
-        self._add_terminal(path)
+        cmdline = SHELL_PRESETS[self._shell_combo.currentIndex()][1]
+        self._add_terminal(path, cmdline)
 
-    def _add_terminal(self, path):
+    def _add_terminal(self, path, cmdline=None):
         idx = self._find_empty_slot()
         if idx is None:
             QMessageBox.warning(self, "提示", f"已达到最大数量 {MAX_TERMINALS}")
@@ -186,15 +236,16 @@ class MainWindow(QMainWindow):
         terminal = TerminalWidget(backend)
         cols = terminal._screen.columns
         rows = terminal._screen.lines
-        backend.start_shell(cwd=path, columns=cols, rows=rows)
+        backend.start_shell(cwd=path, columns=cols, rows=rows, cmdline=cmdline)
 
-        tile = self._make_tile(path, terminal, idx)
+        shell_label = SHELL_PRESETS[self._shell_combo.currentIndex()][0]
+        tile = self._make_tile(path, terminal, idx, shell_label)
         self._slots[idx] = {"backend": backend, "terminal": terminal, "tile": tile}
 
         self._relayout()
         terminal.setFocus()
 
-    def _make_tile(self, path, terminal, slot_idx):
+    def _make_tile(self, path, terminal, slot_idx, shell_label=""):
         tile = QWidget()
         tile.setStyleSheet(f"background: #1e1e1e; border: {TILE_BORDER};")
         tl = QVBoxLayout(tile)
@@ -209,7 +260,8 @@ class MainWindow(QMainWindow):
         bl.setContentsMargins(8, 0, 4, 0)
         bl.setSpacing(0)
 
-        label = QLabel(os.path.basename(path))
+        title = f"{os.path.basename(path)}  {shell_label}"
+        label = QLabel(title)
         label.setStyleSheet("font-family: Consolas; font-size: 11px; color: #aaa; background: transparent; border: none;")
         bl.addWidget(label)
         bl.addStretch()

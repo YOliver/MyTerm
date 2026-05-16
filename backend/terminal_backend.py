@@ -12,13 +12,15 @@ class TerminalBackend(QThread):
         self._columns = 80
         self._rows = 24
 
-    def start_shell(self, cwd=None, columns=80, rows=24):
+    def start_shell(self, cwd=None, columns=80, rows=24, cmdline=None):
         if self.isRunning():
             self.stop()
         self._columns = columns
         self._rows = rows
+        if cmdline is None:
+            cmdline = ["powershell.exe"]
         self._process = PtyProcess.spawn(
-            ["powershell.exe"],
+            cmdline,
             cwd=cwd,
             dimensions=(rows, columns),
         )
