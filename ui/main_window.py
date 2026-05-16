@@ -1,8 +1,8 @@
 import os
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QComboBox, QPushButton, QMessageBox, QFileDialog,
-    QAbstractItemView,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QComboBox, QPushButton, QMessageBox, QFileDialog, QLabel,
+    QAbstractItemView, QSizePolicy,
 )
 from PySide6.QtCore import Qt, QVariantAnimation, QEasingCurve, QAbstractAnimation
 from store.path_history import PathHistory
@@ -49,14 +49,18 @@ class SmoothComboBox(QComboBox):
         self._anim = anim
 
 
+MAX_TERMINALS = 4
+TILE_BORDER = "1px solid #444"
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MyTerm")
-        self.resize(900, 550)
+        self.resize(1100, 650)
 
         self._history = PathHistory()
-        self._backend = TerminalBackend()
+        self._slots = [None] * MAX_TERMINALS  # each: dict or None
 
         central = QWidget()
         central.setStyleSheet("background: #1e1e1e;")
@@ -65,6 +69,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
+        # --- topbar ---
         topbar = QWidget()
         topbar.setFixedHeight(56)
         topbar.setStyleSheet("background: #252526;")
@@ -138,17 +143,20 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(topbar)
 
-        self._terminal = TerminalWidget(self._backend)
-        layout.addWidget(self._terminal, 1)
+        # --- grid area ---
+        self._grid_widget = QWidget()
+        self._grid = QGridLayout(self._grid_widget)
+        self._grid.setContentsMargins(1, 1, 1, 1)
+        self._grid.setSpacing(1)
+        for r in range(2):
+            self._grid.setRowStretch(r, 1)
+        for c in range(2):
+            self._grid.setColumnStretch(c, 1)
+        layout.addWidget(self._grid_widget, 1)
 
         self.setStyleSheet("QMainWindow { background: #1e1e1e; }")
 
-    def _load_history(self):
-        paths = self._history.all()
-        self._path_combo.clear()
-        self._path_combo.addItems(paths)
-        if paths:
-            self._path_combo.setCurrentText(paths[0])
+    # -----------------------------------------------------------------
 
     def _on_launch(self):
         path = self._path_combo.currentText().strip()
@@ -161,10 +169,109 @@ class MainWindow(QMainWindow):
 
         self._history.add(path)
         self._load_history()
-        cols = self._terminal._screen.columns
-        rows = self._terminal._screen.lines
-        self._backend.start_shell(cwd=path, columns=cols, rows=rows)
-        self._terminal.setFocus()
+        self._add_terminal(path)
+
+    def _add_terminal(self, path):
+        idx = self._find_empty_slot()
+        if idx is None:
+            QMessageBox.warning(self, "提示", f"已达到最大数量 {MAX_TERMINALS}")
+            return
+
+        backend = TerminalBackend()
+        terminal = TerminalWidget(backend)
+        cols = terminal._screen.columns
+        rows = terminal._screen.lines
+        backend.start_shell(cwd=path, columns=cols, rows=rows)
+
+        tile = self._make_tile(path, terminal, idx)
+        self._slots[idx] = {"backend": backend, "terminal": terminal, "tile": tile}
+
+        self._relayout()
+        terminal.setFocus()
+
+    def _make_tile(self, path, terminal, slot_idx):
+        tile = QWidget()
+        tile.setStyleSheet(f"background: #1e1e1e; border: {TILE_BORDER};")
+        tl = QVBoxLayout(tile)
+        tl.setContentsMargins(0, 0, 0, 0)
+        tl.setSpacing(0)
+
+        # title bar
+        bar = QWidget()
+        bar.setFixedHeight(24)
+        bar.setStyleSheet("background: #2d2d2d; border: none;")
+        bl = QHBoxLayout(bar)
+        bl.setContentsMargins(8, 0, 4, 0)
+        bl.setSpacing(0)
+
+        label = QLabel(os.path.basename(path))
+        label.setStyleSheet("font-family: Consolas; font-size: 11px; color: #aaa; background: transparent; border: none;")
+        bl.addWidget(label)
+        bl.addStretch()
+
+        close_btn = QPushButton("×")
+        close_btn.setFixedSize(20, 20)
+        close_btn.setStyleSheet(
+            "QPushButton { font-size: 13px; color: #999; background: transparent; border: none; border-radius: 2px; }"
+            "QPushButton:hover { background: #c42b1c; color: #fff; }"
+        )
+        close_btn.clicked.connect(lambda: self._remove_terminal(slot_idx))
+        bl.addWidget(close_btn)
+
+        tl.addWidget(bar)
+        tl.addWidget(terminal, 1)
+        return tile
+
+    def _remove_terminal(self, slot_idx):
+        slot = self._slots[slot_idx]
+        if slot is None:
+            return
+        slot["backend"].stop()
+        # Remove from grid and delete
+        self._grid.removeWidget(slot["tile"])
+        slot["tile"].deleteLater()
+        self._slots[slot_idx] = None
+        self._relayout()
+
+    def _find_empty_slot(self):
+        for i, s in enumerate(self._slots):
+            if s is None:
+                return i
+        return None
+
+    def _active_count(self):
+        return sum(1 for s in self._slots if s is not None)
+
+    def _relayout(self):
+        # Clear grid
+        for i in reversed(range(self._grid.count())):
+            item = self._grid.itemAt(i)
+            if item and item.widget():
+                self._grid.removeWidget(item.widget())
+
+        # Collect non-None slots in order
+        tiles = [s for s in self._slots if s is not None]
+        count = len(tiles)
+
+        if count == 0:
+            return
+
+        spans = {
+            1: [(0, 0, 2, 2)],
+            2: [(0, 0, 2, 1), (0, 1, 2, 1)],
+            3: [(0, 0, 1, 2), (1, 0, 1, 1), (1, 1, 1, 1)],
+            4: [(0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 1, 1)],
+        }
+
+        for i, (r, c, rs, cs) in enumerate(spans[count]):
+            self._grid.addWidget(tiles[i]["tile"], r, c, rs, cs)
+
+    def _load_history(self):
+        paths = self._history.all()
+        self._path_combo.clear()
+        self._path_combo.addItems(paths)
+        if paths:
+            self._path_combo.setCurrentText(paths[0])
 
     def _on_browse(self):
         path = QFileDialog.getExistingDirectory(self, "选择工作目录", "C:\\")
