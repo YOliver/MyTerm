@@ -122,37 +122,61 @@ class TerminalWidget(QWidget):
         start = max(0, total - visible_rows - self._scroll_offset)
         end = total - self._scroll_offset
 
+        # Collect visible rows
+        rows = []
         for idx in range(start, end):
             screen_row = idx - start
             y = screen_row * self._char_height
             if y > self.height():
                 break
-
             if idx < history_len:
                 line = history[idx]
             else:
                 line = self._screen.buffer.get(idx - history_len, {})
+            rows.append((idx, y, line))
 
+        # Pass 1: fill all backgrounds
+        for idx, y, line in rows:
             col = 0
             while col < self._screen.columns:
                 x = col * self._char_width
                 if x > self.width():
                     break
+                char = line.get(col)
+                if char and char.data and char.data != " ":
+                    w = wcwidth.wcwidth(char.data[0])
+                    cell_width = self._char_width * max(w, 1)
+                    bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
+                    if char.reverse:
+                        fg_check = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
+                        bg = fg_check
+                    if self._in_selection(idx, col):
+                        bg = SEL_COLOR
+                    painter.fillRect(x, y, cell_width, self._char_height, bg)
+                    col += max(w, 1)
+                else:
+                    bg = SEL_COLOR if self._in_selection(idx, col) else DEFAULT_BG
+                    painter.fillRect(x, y, self._char_width, self._char_height, bg)
+                    col += 1
 
+        # Pass 2: draw all text + underlines
+        for idx, y, line in rows:
+            col = 0
+            while col < self._screen.columns:
+                x = col * self._char_width
+                if x > self.width():
+                    break
                 char = line.get(col)
                 if char and char.data and char.data != " ":
                     w = wcwidth.wcwidth(char.data[0])
                     cell_width = self._char_width * max(w, 1)
                     fg = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
                     bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
-
                     if char.reverse:
                         fg, bg = bg, fg
-
                     if self._in_selection(idx, col):
                         bg = SEL_COLOR
 
-                    painter.fillRect(x, y, cell_width, self._char_height, bg)
                     painter.setPen(fg)
                     if char.bold or char.italics:
                         f = QFont(self._font)
@@ -169,8 +193,6 @@ class TerminalWidget(QWidget):
                                          x + cell_width, y + self._char_height - 1)
                     col += max(w, 1)
                 else:
-                    bg = SEL_COLOR if self._in_selection(idx, col) else DEFAULT_BG
-                    painter.fillRect(x, y, self._char_width, self._char_height, bg)
                     col += 1
 
         if self._cursor_visible and self._scroll_offset == 0 and not self._screen.cursor.hidden:
