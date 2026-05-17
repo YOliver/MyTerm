@@ -33,6 +33,15 @@ NAMED_COLORS = {
 }
 
 
+def clamp_scroll_offset(offset: int, history_len: int) -> int:
+    """把滚动偏移量夹到 [0, history_len] 区间。0=最新，history_len=最早。"""
+    if offset < 0:
+        return 0
+    if offset > history_len:
+        return history_len
+    return offset
+
+
 class TerminalWidget(QWidget):
     _keymap = {
         Qt.Key.Key_Backspace: "\x7f",
@@ -231,13 +240,29 @@ class TerminalWidget(QWidget):
     def wheelEvent(self, event):
         delta = event.angleDelta().y()
         lines = max(1, abs(delta) // 120)
+        self._scroll_by(-lines if delta > 0 else lines)
+
+    def _visible_rows(self) -> int:
+        return max(1, self._screen.lines)
+
+    def _scroll_by(self, lines: int) -> None:
+        """正数减小 offset（看更新），负数增大 offset（看更旧）。语义与 wheelEvent 一致。"""
         history_len = len(self._screen.history.top)
-        max_offset = max(0, history_len)
-        if delta > 0:
-            self._scroll_offset = max(0, self._scroll_offset - lines)
-        else:
-            self._scroll_offset = min(max_offset, self._scroll_offset + lines)
-        self.update()
+        new_offset = clamp_scroll_offset(self._scroll_offset - lines, history_len)
+        if new_offset != self._scroll_offset:
+            self._scroll_offset = new_offset
+            self.update()
+
+    def _scroll_to_top(self) -> None:
+        history_len = len(self._screen.history.top)
+        if self._scroll_offset != history_len:
+            self._scroll_offset = history_len
+            self.update()
+
+    def _scroll_to_bottom(self) -> None:
+        if self._scroll_offset != 0:
+            self._scroll_offset = 0
+            self.update()
 
     def _to_qcolor(self, color_str):
         if color_str in NAMED_COLORS:
@@ -272,6 +297,22 @@ class TerminalWidget(QWidget):
         text = event.text()
         key = event.key()
         modifiers = event.modifiers()
+
+        # Shift + Page/Home/End：滚动历史（必须在 _keymap 之前拦截，
+        # 否则 PageUp/PageDown 会被转发给 PTY 用于 vim/less）
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            if key == Qt.Key.Key_PageUp:
+                self._scroll_by(-(max(1, self._visible_rows() - 1)))
+                return
+            if key == Qt.Key.Key_PageDown:
+                self._scroll_by(max(1, self._visible_rows() - 1))
+                return
+            if key == Qt.Key.Key_Home:
+                self._scroll_to_top()
+                return
+            if key == Qt.Key.Key_End:
+                self._scroll_to_bottom()
+                return
 
         seq = self._keymap.get(key)
         if seq is not None:
