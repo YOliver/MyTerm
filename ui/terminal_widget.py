@@ -316,6 +316,7 @@ class TerminalWidget(QWidget):
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.RightButton:
+            # 有选区：粘选区，不走剪贴板；无选区：回退到剪贴板（行为类似 Windows Terminal）
             if self._sel_start is not None:
                 text = self._get_selected_text()
                 if text:
@@ -323,6 +324,10 @@ class TerminalWidget(QWidget):
                 self._sel_start = None
                 self._sel_end = None
                 self.update()
+            else:
+                clipboard = QApplication.clipboard().text()
+                if clipboard:
+                    self._backend.write(clipboard)
             return
         if event.button() == Qt.MouseButton.LeftButton:
             self._sel_start = self._pos_to_cell(event.pos())
