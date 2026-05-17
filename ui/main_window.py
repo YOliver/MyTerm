@@ -8,20 +8,14 @@ from PySide6.QtWidgets import (
 )
 
 from store.path_history import PathHistory
+from store.config import AppConfig, compute_grid_shape
 from backend.terminal_backend import TerminalBackend
 from ui.terminal_widget import TerminalWidget
 from ui.smooth_combo import SmoothComboBox
 
 Slot = namedtuple("Slot", ["backend", "terminal", "tile"])
 
-MAX_TERMINALS = 4
 TILE_BORDER = "1px solid #444"
-
-SHELL_PRESETS = [
-    ("<powershell>", ["powershell.exe"]),
-    ("<claude -r>", ["powershell.exe", "-NoExit", "-Command", "claude -r"]),
-    ("<cmd>",        ["cmd.exe"]),
-]
 
 COMBO_STYLE = (
     "QComboBox {{"
@@ -52,13 +46,14 @@ COMBO_STYLE = (
 
 
 class MainWindow(QMainWindow):
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("MyTerm")
         self.resize(1100, 650)
 
         self._history = PathHistory()
-        self._slots = [None] * MAX_TERMINALS  # each: dict or None
+        self._config = AppConfig()
+        self._slots: list[Slot | None] = [None] * self._config.max_terminals
 
         central = QWidget()
         central.setStyleSheet("background: #1e1e1e;")
@@ -89,8 +84,8 @@ class MainWindow(QMainWindow):
         self._shell_combo.setMinimumHeight(30)
         self._shell_combo.setStyleSheet(
             COMBO_STYLE.format("5px 8px", "4px", "6px 8px", "24px"))
-        for label, _ in SHELL_PRESETS:
-            self._shell_combo.addItem(label)
+        for preset in self._config.shell_presets:
+            self._shell_combo.addItem(preset.label)
         topbar_layout.addWidget(self._shell_combo)
 
         browse_btn = QPushButton("浏览")
@@ -122,10 +117,7 @@ class MainWindow(QMainWindow):
         self._grid = QGridLayout(self._grid_widget)
         self._grid.setContentsMargins(1, 1, 1, 1)
         self._grid.setSpacing(1)
-        for r in range(2):
-            self._grid.setRowStretch(r, 1)
-        for c in range(2):
-            self._grid.setColumnStretch(c, 1)
+        # 行/列 stretch 由 _relayout 按当前槽位数动态设置
         layout.addWidget(self._grid_widget, 1)
 
         self.setStyleSheet("QMainWindow { background: #1e1e1e; }")
@@ -141,7 +133,7 @@ class MainWindow(QMainWindow):
 
         self._history.add(path)
         self._load_history()
-        cmdline = list(SHELL_PRESETS[self._shell_combo.currentIndex()][1])
+        cmdline = list(self._config.shell_presets[self._shell_combo.currentIndex()].command)
         if cmdline[-1] == "claude -r":
             if not self._has_claude_session(path):
                 cmdline[-1] = "claude"
@@ -150,7 +142,7 @@ class MainWindow(QMainWindow):
     def _add_terminal(self, path, cmdline=None):
         idx = self._find_empty_slot()
         if idx is None:
-            QMessageBox.warning(self, "提示", f"已达到最大数量 {MAX_TERMINALS}")
+            QMessageBox.warning(self, "提示", f"已达到最大数量 {self._config.max_terminals}")
             return
 
         backend = TerminalBackend()
@@ -158,7 +150,7 @@ class MainWindow(QMainWindow):
         backend.start_shell(cwd=path, columns=terminal.columns,
                             rows=terminal.rows, cmdline=cmdline)
 
-        shell_label = SHELL_PRESETS[self._shell_combo.currentIndex()][0]
+        shell_label = self._config.shell_presets[self._shell_combo.currentIndex()].label
         tile = self._make_tile(path, terminal, idx, shell_label)
         self._slots[idx] = Slot(backend, terminal, tile)
 
@@ -217,28 +209,37 @@ class MainWindow(QMainWindow):
     def _active_count(self):
         return sum(1 for s in self._slots if s is not None)
 
-    def _relayout(self):
+    def _relayout(self) -> None:
+        # 1) 移除旧 widgets
         for i in reversed(range(self._grid.count())):
             item = self._grid.itemAt(i)
             if item and item.widget():
                 self._grid.removeWidget(item.widget())
 
-        # Collect non-None slots in order
+        # 2) 收集非空 tile
         tiles = [s for s in self._slots if s is not None]
         count = len(tiles)
-
         if count == 0:
             return
 
-        spans = {
-            1: [(0, 0, 2, 2)],
-            2: [(0, 0, 2, 1), (0, 1, 2, 1)],
-            3: [(0, 0, 1, 2), (1, 0, 1, 1), (1, 1, 1, 1)],
-            4: [(0, 0, 1, 1), (0, 1, 1, 1), (1, 0, 1, 1), (1, 1, 1, 1)],
-        }
+        # 3) 按通用算法计算最接近正方形的网格
+        rows, cols = compute_grid_shape(count)
 
-        for i, (r, c, rs, cs) in enumerate(spans[count]):
-            self._grid.addWidget(tiles[i].tile, r, c, rs, cs)
+        # 4) 清掉所有旧 stretch（防止上次更大网格残留 stretch=1 的空行/空列）
+        for r in range(self._grid.rowCount()):
+            self._grid.setRowStretch(r, 0)
+        for c in range(self._grid.columnCount()):
+            self._grid.setColumnStretch(c, 0)
+
+        # 5) 按新维度设置 stretch
+        for r in range(rows):
+            self._grid.setRowStretch(r, 1)
+        for c in range(cols):
+            self._grid.setColumnStretch(c, 1)
+
+        # 6) 逐个 addWidget，全部 1×1
+        for i, slot in enumerate(tiles):
+            self._grid.addWidget(slot.tile, i // cols, i % cols)
 
     def _has_claude_session(self, path):
         # Claude encodes D:\project\MyTerm -> D--project-MyTerm

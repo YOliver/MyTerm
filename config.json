@@ -1,0 +1,44 @@
+{
+  "max_terminals": 4,
+  "shell_presets": [
+    {
+      "label": "<powershell>",
+      "command": [
+        "powershell.exe"
+      ]
+    },
+    {
+      "label": "<claude -r>",
+      "command": [
+        "powershell.exe",
+        "-NoExit",
+        "-Command",
+        "claude -r"
+      ]
+    },
+    {
+      "label": "<codebuddy>",
+      "command": [
+        "powershell.exe",
+        "-NoExit",
+        "-Command",
+        "codebuddy"
+      ]
+    },
+    {
+      "label": "<claude-internal>",
+      "command": [
+        "powershell.exe",
+        "-NoExit",
+        "-Command",
+        "claude-internal"
+      ]
+    },
+    {
+      "label": "<cmd>",
+      "command": [
+        "cmd.exe"
+      ]
+    }
+  ]
+}
