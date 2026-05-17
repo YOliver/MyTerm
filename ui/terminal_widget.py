@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
-from PySide6.QtCore import Qt, QTimer, QEvent
+from PySide6.QtCore import Qt, QTimer, QEvent, QRectF
 from pyte.screens import HistoryScreen
 import pyte
 import wcwidth
@@ -34,18 +34,32 @@ NAMED_COLORS = {
 
 
 class TerminalWidget(QWidget):
+    _keymap = {
+        Qt.Key.Key_Backspace: "\x7f",
+        Qt.Key.Key_Return: "\r", Qt.Key.Key_Enter: "\r",
+        Qt.Key.Key_Tab: "\t", Qt.Key.Key_Escape: "\x1b",
+        Qt.Key.Key_Up: "\x1b[A", Qt.Key.Key_Down: "\x1b[B",
+        Qt.Key.Key_Right: "\x1b[C", Qt.Key.Key_Left: "\x1b[D",
+        Qt.Key.Key_Home: "\x1b[H", Qt.Key.Key_End: "\x1b[F",
+        Qt.Key.Key_Delete: "\x1b[3~",
+        Qt.Key.Key_PageUp: "\x1b[5~", Qt.Key.Key_PageDown: "\x1b[6~",
+    }
+    _ctrlmap = {
+        Qt.Key.Key_D: "\x04", Qt.Key.Key_Z: "\x1a",
+        Qt.Key.Key_A: "\x01", Qt.Key.Key_E: "\x05", Qt.Key.Key_L: "\x0c",
+    }
+
     def __init__(self, backend, parent=None):
         super().__init__(parent)
         self._backend = backend
         self._screen = HistoryScreen(80, 24, history=2000)
         self._stream = pyte.Stream(self._screen)
         self._font = QFont("Consolas", 14)
-        self._fm = QFontMetrics(self._font)
-        self._char_width = self._fm.horizontalAdvance("A")
-        self._char_height = self._fm.height()
+        self._build_font_variants()
+        self._update_font_metrics()
         self._cursor_visible = True
         self._scroll_offset = 0
-        self._sel_start = None    # (abs_row, col)
+        self._sel_start = None
         self._sel_end = None
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -89,10 +103,25 @@ class TerminalWidget(QWidget):
 
     def _blink_cursor(self):
         self._cursor_visible = not self._cursor_visible
-        self.update()
+        cx = self._screen.cursor.x * self._char_width
+        cy = self._screen.cursor.y * self._char_height
+        self.update(cx, cy, self._char_width, self._char_height)
+
+    def _build_font_variants(self):
+        self._font_bold = QFont(self._font)
+        self._font_bold.setBold(True)
+        self._font_italic = QFont(self._font)
+        self._font_italic.setItalic(True)
+        self._font_bi = QFont(self._font)
+        self._font_bi.setBold(True)
+        self._font_bi.setItalic(True)
+
+    def _update_font_metrics(self):
+        self._fm = QFontMetrics(self._font)
+        self._char_width = self._fm.horizontalAdvance("A")
+        self._char_height = self._fm.height()
 
     def _in_selection(self, abs_row, col):
-        """Check if cell (abs_row, col) is within the current selection."""
         sel_start, sel_end = self._normalize_selection()
         if sel_start is None:
             return False
@@ -108,6 +137,7 @@ class TerminalWidget(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
+        painter.setClipRect(event.rect())
         painter.setFont(self._font)
 
         history = self._screen.history.top
@@ -122,7 +152,6 @@ class TerminalWidget(QWidget):
         start = max(0, total - visible_rows - self._scroll_offset)
         end = total - self._scroll_offset
 
-        # Collect visible rows
         rows = []
         for idx in range(start, end):
             screen_row = idx - start
@@ -135,7 +164,6 @@ class TerminalWidget(QWidget):
                 line = self._screen.buffer.get(idx - history_len, {})
             rows.append((idx, y, line))
 
-        # Pass 1: fill all backgrounds
         for idx, y, line in rows:
             col = 0
             while col < self._screen.columns:
@@ -159,7 +187,6 @@ class TerminalWidget(QWidget):
                     painter.fillRect(x, y, self._char_width, self._char_height, bg)
                     col += 1
 
-        # Pass 2: draw all text + underlines
         for idx, y, line in rows:
             col = 0
             while col < self._screen.columns:
@@ -178,13 +205,12 @@ class TerminalWidget(QWidget):
                         bg = SEL_COLOR
 
                     painter.setPen(fg)
-                    if char.bold or char.italics:
-                        f = QFont(self._font)
-                        if char.bold:
-                            f.setBold(True)
-                        if char.italics:
-                            f.setItalic(True)
-                        painter.setFont(f)
+                    if char.bold and char.italics:
+                        painter.setFont(self._font_bi)
+                    elif char.bold:
+                        painter.setFont(self._font_bold)
+                    elif char.italics:
+                        painter.setFont(self._font_italic)
                     painter.drawText(x, y + self._fm.ascent(), char.data)
                     if char.bold or char.italics:
                         painter.setFont(self._font)
@@ -218,10 +244,8 @@ class TerminalWidget(QWidget):
             return NAMED_COLORS[color_str]
         if len(color_str) == 6:
             try:
-                r = int(color_str[0:2], 16)
-                g = int(color_str[2:4], 16)
-                b = int(color_str[4:6], 16)
-                return QColor(r, g, b)
+                v = int(color_str, 16)
+                return QColor((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF)
             except ValueError:
                 pass
         return DEFAULT_FG
@@ -235,7 +259,6 @@ class TerminalWidget(QWidget):
         if query == Qt.InputMethodQuery.ImCursorRectangle:
             cx = self._screen.cursor.x * self._char_width
             cy = self._screen.cursor.y * self._char_height
-            from PySide6.QtCore import QRectF
             return QRectF(cx, cy, self._char_width, self._char_height)
         return None
 
@@ -250,57 +273,32 @@ class TerminalWidget(QWidget):
         key = event.key()
         modifiers = event.modifiers()
 
-        if key == Qt.Key.Key_Backspace:
-            self._backend.write("\x7f")
-        elif key == Qt.Key.Key_Return or key == Qt.Key.Key_Enter:
-            self._backend.write("\r")
-        elif key == Qt.Key.Key_Tab:
-            self._backend.write("\t")
-        elif key == Qt.Key.Key_Escape:
-            self._backend.write("\x1b")
-        elif key == Qt.Key.Key_Up:
-            self._backend.write("\x1b[A")
-        elif key == Qt.Key.Key_Down:
-            self._backend.write("\x1b[B")
-        elif key == Qt.Key.Key_Right:
-            self._backend.write("\x1b[C")
-        elif key == Qt.Key.Key_Left:
-            self._backend.write("\x1b[D")
-        elif key == Qt.Key.Key_Home:
-            self._backend.write("\x1b[H")
-        elif key == Qt.Key.Key_End:
-            self._backend.write("\x1b[F")
-        elif key == Qt.Key.Key_Delete:
-            self._backend.write("\x1b[3~")
-        elif key == Qt.Key.Key_PageUp:
-            self._backend.write("\x1b[5~")
-        elif key == Qt.Key.Key_PageDown:
-            self._backend.write("\x1b[6~")
-        elif modifiers & Qt.KeyboardModifier.ControlModifier:
-            if modifiers & Qt.KeyboardModifier.ShiftModifier:
-                if key == Qt.Key.Key_C:
-                    self._copy_selection()
-                    return
-            elif key == Qt.Key.Key_C:
+        seq = self._keymap.get(key)
+        if seq is not None:
+            self._backend.write(seq)
+            return
+
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            if modifiers & Qt.KeyboardModifier.ShiftModifier and key == Qt.Key.Key_C:
+                self._copy_selection()
+                return
+            if key == Qt.Key.Key_C:
                 if self._sel_start is not None:
                     self._copy_selection()
                     return
                 self._backend.write("\x03")
-            elif key == Qt.Key.Key_D:
-                self._backend.write("\x04")
-            elif key == Qt.Key.Key_Z:
-                self._backend.write("\x1a")
-            elif key == Qt.Key.Key_V:
+                return
+            cseq = self._ctrlmap.get(key)
+            if cseq is not None:
+                self._backend.write(cseq)
+                return
+            if key == Qt.Key.Key_V:
                 clipboard = QApplication.clipboard().text()
                 if clipboard:
                     self._backend.write(clipboard)
-            elif key == Qt.Key.Key_A:
-                self._backend.write("\x01")
-            elif key == Qt.Key.Key_E:
-                self._backend.write("\x05")
-            elif key == Qt.Key.Key_L:
-                self._backend.write("\x0c")
-        elif text and len(text) > 0:
+                return
+
+        if text:
             self._backend.write(text)
 
     def _abs_row(self):
@@ -423,9 +421,16 @@ class TerminalWidget(QWidget):
         self._sel_end = None
         self.update()
 
+    @property
+    def columns(self):
+        return self._screen.columns
+
+    @property
+    def rows(self):
+        return self._screen.lines
+
     def set_font_size(self, size):
         self._font = QFont("Consolas", size)
-        self._fm = QFontMetrics(self._font)
-        self._char_width = self._fm.horizontalAdvance("A")
-        self._char_height = self._fm.height()
+        self._build_font_variants()
+        self._update_font_metrics()
         self._apply_resize()

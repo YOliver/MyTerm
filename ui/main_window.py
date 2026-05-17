@@ -1,54 +1,18 @@
 import os
+from collections import namedtuple
+
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QComboBox, QPushButton, QMessageBox, QFileDialog, QLabel,
-    QAbstractItemView, QSizePolicy,
+    QPushButton, QMessageBox, QFileDialog, QLabel, QSizePolicy,
 )
-from PySide6.QtCore import Qt, QVariantAnimation, QEasingCurve, QAbstractAnimation
-from PySide6.QtGui import QIcon
+
 from store.path_history import PathHistory
 from backend.terminal_backend import TerminalBackend
 from ui.terminal_widget import TerminalWidget
+from ui.smooth_combo import SmoothComboBox
 
-
-class SmoothComboBox(QComboBox):
-    """下拉抽屉动画 — setMask 裁剪，不碰几何属性避免定位漂移"""
-
-    def showPopup(self):
-        super().showPopup()
-        popup = self.findChild(QAbstractItemView)
-        if not popup or not popup.isVisible():
-            return
-
-        # 始终从顶部展开：先滚到顶部，再修正容器位置到路径框正下方
-        popup.scrollToTop()
-        container = popup.parent()
-        if container:
-            from PySide6.QtWidgets import QFrame
-            container.setFrameShape(QFrame.Shape.NoFrame)
-            container.setStyleSheet("background: #252526;")
-            # 强制容器顶部对齐路径框底部
-            combo_bottom = self.mapToGlobal(self.rect().bottomLeft())
-            geo = container.geometry()
-            geo.moveTop(combo_bottom.y())
-            container.setGeometry(geo)
-        popup.setViewportMargins(0, 0, 0, 0)
-
-        from PySide6.QtGui import QRegion
-
-        w = popup.width()
-        h = popup.height()
-
-        anim = QVariantAnimation()
-        anim.setDuration(180)
-        anim.setStartValue(2)
-        anim.setEndValue(h)
-        anim.setEasingCurve(QEasingCurve.OutCubic)
-        anim.valueChanged.connect(lambda v: popup.setMask(QRegion(0, 0, w, v)))
-        anim.finished.connect(popup.clearMask)
-        anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
-        self._anim = anim
-
+Slot = namedtuple("Slot", ["backend", "terminal", "tile"])
 
 MAX_TERMINALS = 4
 TILE_BORDER = "1px solid #444"
@@ -59,16 +23,39 @@ SHELL_PRESETS = [
     ("<cmd>",        ["cmd.exe"]),
 ]
 
+COMBO_STYLE = (
+    "QComboBox {{"
+    "  font-family: Consolas; font-size: 13px;"
+    "  padding: {};"
+    "  border: 1px solid #555; border-radius: {};"
+    "  background: #1e1e1e; color: #ccc;"
+    "}}"
+    "QComboBox:hover {{ border-color: #777; }}"
+    "QComboBox:focus {{ border-color: #0e639c; }}"
+    "QComboBox QAbstractItemView {{"
+    "  background: #252526; color: #ccc;"
+    "  selection-background-color: #094771; selection-color: #fff;"
+    "  border: 1px solid #555; border-radius: 4px;"
+    "  outline: none;"
+    "}}"
+    "QComboBox QAbstractItemView::item {{"
+    "  padding: {}; border-radius: 3px; min-height: {};"
+    "}}"
+    "QComboBox QAbstractItemView::item:hover {{ background: #2a2d2e; }}"
+    "QComboBox QAbstractItemView::item:selected {{ background: #094771; }}"
+    "QScrollBar:vertical {{ width: 6px; background: #1e1e1e; border-radius: 3px; }}"
+    "QScrollBar::handle:vertical {{"
+    "  background: #555; border-radius: 3px; min-height: 20px; }}"
+    "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}"
+    "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}"
+)
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("MyTerm")
         self.resize(1100, 650)
-
-        icon = os.path.join(os.path.dirname(os.path.dirname(__file__)), "icon.png")
-        if os.path.exists(icon):
-            self.setWindowIcon(QIcon(icon))
 
         self._history = PathHistory()
         self._slots = [None] * MAX_TERMINALS  # each: dict or None
@@ -80,7 +67,6 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # --- topbar ---
         topbar = QWidget()
         topbar.setFixedHeight(56)
         topbar.setStyleSheet("background: #252526;")
@@ -92,42 +78,7 @@ class MainWindow(QMainWindow):
         self._path_combo.setMinimumWidth(300)
         self._path_combo.setMinimumHeight(30)
         self._path_combo.setStyleSheet(
-            "QComboBox {"
-            "  font-family: Consolas; font-size: 13px;"
-            "  padding: 5px 10px;"
-            "  border: 1px solid #555; border-radius: 4px;"
-            "  background: #1e1e1e; color: #ccc;"
-            "}"
-            "QComboBox:hover { border-color: #777; }"
-            "QComboBox:focus { border-color: #0e639c; }"
-            "QComboBox QAbstractItemView {"
-            "  background: #252526; color: #ccc;"
-            "  selection-background-color: #094771; selection-color: #fff;"
-            "  border: 1px solid #555; border-radius: 4px;"
-            "  outline: none;"
-            "}"
-            "QComboBox QAbstractItemView::item {"
-            "  padding: 6px 10px; border-radius: 3px; min-height: 26px;"
-            "}"
-            "QComboBox QAbstractItemView::item:hover {"
-            "  background: #2a2d2e;"
-            "}"
-            "QComboBox QAbstractItemView::item:selected {"
-            "  background: #094771;"
-            "}"
-            "QScrollBar:vertical {"
-            "  width: 6px; background: #1e1e1e; border-radius: 3px;"
-            "}"
-            "QScrollBar::handle:vertical {"
-            "  background: #555; border-radius: 3px; min-height: 20px;"
-            "}"
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
-            "  height: 0;"
-            "}"
-            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
-            "  background: none;"
-            "}"
-        )
+            COMBO_STYLE.format("5px 10px", "4px", "6px 10px", "26px"))
         self._path_combo.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._load_history()
         topbar_layout.addWidget(self._path_combo, 1)
@@ -137,41 +88,7 @@ class MainWindow(QMainWindow):
         self._shell_combo.setMinimumWidth(130)
         self._shell_combo.setMinimumHeight(30)
         self._shell_combo.setStyleSheet(
-            "QComboBox {"
-            "  font-family: Consolas; font-size: 13px;"
-            "  padding: 5px 8px;"
-            "  border: 1px solid #555; border-radius: 4px;"
-            "  background: #1e1e1e; color: #ccc;"
-            "}"
-            "QComboBox:hover { border-color: #777; }"
-            "QComboBox:focus { border-color: #0e639c; }"
-            "QComboBox QAbstractItemView {"
-            "  background: #252526; color: #ccc;"
-            "  selection-background-color: #094771; selection-color: #fff;"
-            "  border: 1px solid #555; outline: none;"
-            "}"
-            "QComboBox QAbstractItemView::item {"
-            "  padding: 6px 8px; min-height: 24px;"
-            "}"
-            "QComboBox QAbstractItemView::item:hover {"
-            "  background: #2a2d2e;"
-            "}"
-            "QComboBox QAbstractItemView::item:selected {"
-            "  background: #094771;"
-            "}"
-            "QScrollBar:vertical {"
-            "  width: 6px; background: #1e1e1e; border-radius: 3px;"
-            "}"
-            "QScrollBar::handle:vertical {"
-            "  background: #555; border-radius: 3px; min-height: 20px;"
-            "}"
-            "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
-            "  height: 0;"
-            "}"
-            "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
-            "  background: none;"
-            "}"
-        )
+            COMBO_STYLE.format("5px 8px", "4px", "6px 8px", "24px"))
         for label, _ in SHELL_PRESETS:
             self._shell_combo.addItem(label)
         topbar_layout.addWidget(self._shell_combo)
@@ -201,7 +118,6 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(topbar)
 
-        # --- grid area ---
         self._grid_widget = QWidget()
         self._grid = QGridLayout(self._grid_widget)
         self._grid.setContentsMargins(1, 1, 1, 1)
@@ -213,8 +129,6 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._grid_widget, 1)
 
         self.setStyleSheet("QMainWindow { background: #1e1e1e; }")
-
-    # -----------------------------------------------------------------
 
     def _on_launch(self):
         path = self._path_combo.currentText().strip()
@@ -241,13 +155,12 @@ class MainWindow(QMainWindow):
 
         backend = TerminalBackend()
         terminal = TerminalWidget(backend)
-        cols = terminal._screen.columns
-        rows = terminal._screen.lines
-        backend.start_shell(cwd=path, columns=cols, rows=rows, cmdline=cmdline)
+        backend.start_shell(cwd=path, columns=terminal.columns,
+                            rows=terminal.rows, cmdline=cmdline)
 
         shell_label = SHELL_PRESETS[self._shell_combo.currentIndex()][0]
         tile = self._make_tile(path, terminal, idx, shell_label)
-        self._slots[idx] = {"backend": backend, "terminal": terminal, "tile": tile}
+        self._slots[idx] = Slot(backend, terminal, tile)
 
         self._relayout()
         terminal.setFocus()
@@ -259,7 +172,6 @@ class MainWindow(QMainWindow):
         tl.setContentsMargins(0, 0, 0, 0)
         tl.setSpacing(0)
 
-        # title bar
         bar = QWidget()
         bar.setFixedHeight(24)
         bar.setStyleSheet("background: #2d2d2d; border: none;")
@@ -290,10 +202,9 @@ class MainWindow(QMainWindow):
         slot = self._slots[slot_idx]
         if slot is None:
             return
-        slot["backend"].stop()
-        # Remove from grid and delete
-        self._grid.removeWidget(slot["tile"])
-        slot["tile"].deleteLater()
+        slot.backend.stop()
+        self._grid.removeWidget(slot.tile)
+        slot.tile.deleteLater()
         self._slots[slot_idx] = None
         self._relayout()
 
@@ -307,7 +218,6 @@ class MainWindow(QMainWindow):
         return sum(1 for s in self._slots if s is not None)
 
     def _relayout(self):
-        # Clear grid
         for i in reversed(range(self._grid.count())):
             item = self._grid.itemAt(i)
             if item and item.widget():
@@ -328,7 +238,7 @@ class MainWindow(QMainWindow):
         }
 
         for i, (r, c, rs, cs) in enumerate(spans[count]):
-            self._grid.addWidget(tiles[i]["tile"], r, c, rs, cs)
+            self._grid.addWidget(tiles[i].tile, r, c, rs, cs)
 
     def _has_claude_session(self, path):
         # Claude encodes D:\project\MyTerm -> D--project-MyTerm
