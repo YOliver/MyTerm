@@ -19,11 +19,11 @@ _HARD_MAX_TERMINALS = 9
 
 _DEFAULT_MAX_TERMINALS = 4
 _DEFAULT_SHELL_PRESETS: list[dict[str, Any]] = [
-    {"label": "<powershell>",      "command": ["powershell.exe"]},
-    {"label": "<claude -r>",       "command": ["powershell.exe", "-NoExit", "-Command", "claude -r"]},
-    {"label": "<codebuddy>",       "command": ["powershell.exe", "-NoExit", "-Command", "codebuddy"]},
-    {"label": "<claude-internal>", "command": ["powershell.exe", "-NoExit", "-Command", "claude-internal"]},
-    {"label": "<cmd>",             "command": ["cmd.exe"]},
+    {"label": "powershell",      "command": ["powershell.exe"]},
+    {"label": "claude -r",       "command": ["powershell.exe", "-NoExit", "-Command", "claude -r"]},
+    {"label": "codebuddy",       "command": ["powershell.exe", "-NoExit", "-Command", "codebuddy"]},
+    {"label": "claude-internal", "command": ["powershell.exe", "-NoExit", "-Command", "claude-internal"]},
+    {"label": "cmd",             "command": ["cmd.exe"]},
 ]
 
 
