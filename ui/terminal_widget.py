@@ -51,6 +51,21 @@ def clamp_scroll_offset(offset: int, history_len: int) -> int:
     return offset
 
 
+def is_real_selection(
+    sel_start: tuple[int, int] | None,
+    sel_end: tuple[int, int] | None,
+) -> bool:
+    """判定是否拖出了一段非空选区。
+
+    左键单击会把 `_sel_start` 设成点击位置但 `_sel_end` 仍是 None，
+    这种情况不算选区——否则右键会被"假选区"吃掉一次，表现为右键
+    两次才能粘贴。两端都存在且不相同才是真选区。
+    """
+    if sel_start is None or sel_end is None:
+        return False
+    return sel_start != sel_end
+
+
 class TerminalWidget(QWidget):
     _keymap = {
         Qt.Key.Key_Backspace: "\x7f",
@@ -362,10 +377,14 @@ class TerminalWidget(QWidget):
         col = pos.x() // self._char_width
         return abs_row, col
 
+    def _has_real_selection(self) -> bool:
+        """实例侧的便捷封装，逻辑见模块级 `is_real_selection`。"""
+        return is_real_selection(self._sel_start, self._sel_end)
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.RightButton:
-            # 有选区：粘选区，不走剪贴板；无选区：回退到剪贴板（行为类似 Windows Terminal）
-            if self._sel_start is not None:
+            # 有真实选区：粘选区，不走剪贴板；否则回退到剪贴板（行为类似 Windows Terminal）
+            if self._has_real_selection():
                 text = self._get_selected_text()
                 if text:
                     self._backend.write(text)
@@ -373,6 +392,11 @@ class TerminalWidget(QWidget):
                 self._sel_end = None
                 self.update()
             else:
+                # 顺手把可能存在的"假选区"（左键单击残留）清掉，避免后续渲染异常
+                if self._sel_start is not None:
+                    self._sel_start = None
+                    self._sel_end = None
+                    self.update()
                 self._paste_from_clipboard()
             return
         if event.button() == Qt.MouseButton.LeftButton:
