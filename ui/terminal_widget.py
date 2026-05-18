@@ -1,9 +1,18 @@
+import os
+
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
 from PySide6.QtCore import Qt, QTimer, QEvent, QRectF
 from pyte.screens import HistoryScreen
 import pyte
 import wcwidth
+
+from store.clipboard_image import format_path_for_pty, save_clipboard_image
+
+
+# 工程根目录下的图片粘贴缓存目录。剪贴板含图时落盘到这里，已在 .gitignore 中。
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_PASTE_CACHE_DIR = os.path.join(_PROJECT_ROOT, ".paste_cache")
 
 
 DEFAULT_FG = QColor(192, 192, 192)
@@ -334,9 +343,7 @@ class TerminalWidget(QWidget):
                 self._backend.write(cseq)
                 return
             if key == Qt.Key.Key_V:
-                clipboard = QApplication.clipboard().text()
-                if clipboard:
-                    self._backend.write(clipboard)
+                self._paste_from_clipboard()
                 return
 
         if text:
@@ -366,9 +373,7 @@ class TerminalWidget(QWidget):
                 self._sel_end = None
                 self.update()
             else:
-                clipboard = QApplication.clipboard().text()
-                if clipboard:
-                    self._backend.write(clipboard)
+                self._paste_from_clipboard()
             return
         if event.button() == Qt.MouseButton.LeftButton:
             self._sel_start = self._pos_to_cell(event.pos())
@@ -466,6 +471,26 @@ class TerminalWidget(QWidget):
         self._sel_start = None
         self._sel_end = None
         self.update()
+
+    def _paste_from_clipboard(self):
+        """统一的粘贴入口：剪贴板有图就落盘并写入路径，否则回退到文本。
+
+        QQ 截图、浏览器复制图片等场景剪贴板会同时携带图与文本两份格式，
+        此处采用"图优先"——直觉上有图就是想发图（claude/codebuddy 都支持读图）。
+        若落盘失败（磁盘问题等）静默回退到文本，保证粘贴动作不会"什么都没发生"。
+        """
+        clipboard = QApplication.clipboard()
+        mime = clipboard.mimeData()
+        if mime is not None and mime.hasImage():
+            image = clipboard.image()
+            if not image.isNull():
+                path = save_clipboard_image(image, _PASTE_CACHE_DIR)
+                if path:
+                    self._backend.write(format_path_for_pty(path))
+                    return
+        text = clipboard.text()
+        if text:
+            self._backend.write(text)
 
     @property
     def columns(self):
