@@ -57,13 +57,37 @@ def is_real_selection(
 ) -> bool:
     """判定是否拖出了一段非空选区。
 
-    左键单击会把 `_sel_start` 设成点击位置但 `_sel_end` 仍是 None，
+    左键单击会把 `_sel_start` 设成点击位置但 `_sel_end` 仍是 None,
     这种情况不算选区——否则右键会被"假选区"吃掉一次，表现为右键
     两次才能粘贴。两端都存在且不相同才是真选区。
     """
     if sel_start is None or sel_end is None:
         return False
     return sel_start != sel_end
+
+
+# 在中文/CJK 环境下被真终端按 2 格宽渲染、但 wcwidth.wcwidth 返回 1 的"歧义宽度"符号。
+# Unicode 把这些符号定为 East Asian Ambiguous，CJK locale 下应取 2，否则取 1。
+# CLI 工具（claude/codebuddy/各种状态行）用它们做图标，按 1 格算会和后续文字重叠。
+# 集合按需扩充，遇到新的对齐错位再加。
+_EAST_ASIAN_AMBIGUOUS_WIDE = frozenset(
+    "⚠✓✗●○◎★☆■□▲△▼▽◆◇◯※→←↑↓⇒⇐⇑⇓"
+)
+
+
+def cell_width(ch: str) -> int:
+    """返回字符在终端里实际占的列数。空字符串/None 视为 1 格占位。
+
+    歧义宽字符（_EAST_ASIAN_AMBIGUOUS_WIDE）在 CJK 环境下按 2 格处理，
+    其余依赖 wcwidth.wcwidth；wcwidth 返回 -1/0 的（控制字符等）夹到 1。
+    """
+    if not ch:
+        return 1
+    first = ch[0]
+    if first in _EAST_ASIAN_AMBIGUOUS_WIDE:
+        return 2
+    w = wcwidth.wcwidth(first)
+    return max(w, 1)
 
 
 class TerminalWidget(QWidget):
@@ -205,16 +229,16 @@ class TerminalWidget(QWidget):
                     break
                 char = line.get(col)
                 if char and char.data and char.data != " ":
-                    w = wcwidth.wcwidth(char.data[0])
-                    cell_width = self._char_width * max(w, 1)
+                    w = cell_width(char.data)
+                    px_width = self._char_width * w
                     bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
                     if char.reverse:
                         fg_check = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
                         bg = fg_check
                     if self._in_selection(idx, col):
                         bg = SEL_COLOR
-                    painter.fillRect(x, y, cell_width, self._char_height, bg)
-                    col += max(w, 1)
+                    painter.fillRect(x, y, px_width, self._char_height, bg)
+                    col += w
                 else:
                     bg = SEL_COLOR if self._in_selection(idx, col) else DEFAULT_BG
                     painter.fillRect(x, y, self._char_width, self._char_height, bg)
@@ -228,8 +252,8 @@ class TerminalWidget(QWidget):
                     break
                 char = line.get(col)
                 if char and char.data and char.data != " ":
-                    w = wcwidth.wcwidth(char.data[0])
-                    cell_width = self._char_width * max(w, 1)
+                    w = cell_width(char.data)
+                    px_width = self._char_width * w
                     fg = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
                     bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
                     if char.reverse:
@@ -249,8 +273,8 @@ class TerminalWidget(QWidget):
                         painter.setFont(self._font)
                     if char.underscore:
                         painter.drawLine(x, y + self._char_height - 1,
-                                         x + cell_width, y + self._char_height - 1)
-                    col += max(w, 1)
+                                         x + px_width, y + self._char_height - 1)
+                    col += w
                 else:
                     col += 1
 
@@ -480,8 +504,7 @@ class TerminalWidget(QWidget):
                 if ch and ch.data:
                     chars.append(ch.data)
                     # Skip placeholder column for wide chars
-                    w = wcwidth.wcwidth(ch.data[0])
-                    col += max(w, 1)
+                    col += cell_width(ch.data)
                 else:
                     chars.append(" ")
                     col += 1
