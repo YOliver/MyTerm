@@ -55,6 +55,8 @@ class MainWindow(QMainWindow):
         self._config = AppConfig()
         self._slots: list[Slot | None] = [None] * self._config.max_terminals
 
+        self._build_menubar()
+
         central = QWidget()
         central.setStyleSheet("background: #1e1e1e;")
         self.setCentralWidget(central)
@@ -261,3 +263,24 @@ class MainWindow(QMainWindow):
             self._path_combo.setCurrentText(path)
             self._history.add(path)
             self._load_history()
+
+    def _build_menubar(self):
+        """主窗口顶部标准 QMenuBar，深色主题与 topbar 对齐。"""
+        menubar = self.menuBar()
+        menubar.setStyleSheet(
+            "QMenuBar { background: #2d2d2d; color: #ccc; }"
+            "QMenuBar::item { padding: 4px 12px; background: transparent; }"
+            "QMenuBar::item:selected { background: #094771; }"
+            "QMenu { background: #252526; color: #ccc; border: 1px solid #555; }"
+            "QMenu::item { padding: 6px 24px; }"
+            "QMenu::item:selected { background: #094771; }"
+        )
+        env_menu = menubar.addMenu("环境")
+        check_action = env_menu.addAction("检测依赖")
+        check_action.triggered.connect(self._on_check_env)
+
+    def _on_check_env(self):
+        # 延迟 import：对话框模块只在用户点开菜单时加载，启动期不付代价
+        from ui.env_check_dialog import EnvCheckDialog
+        dlg = EnvCheckDialog(self)
+        dlg.exec()
