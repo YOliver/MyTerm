@@ -30,20 +30,65 @@ python main.py
 
 ## 构建安装包
 
-一键发布：
+### 前置依赖
+
+- Python 3.10+（开发与发版用 3.14），并跑过 `pip install -r requirements.txt`
+- PyInstaller：`pip install pyinstaller`
+- Pillow：`pip install pillow`（生成 `icon.ico` 用）
+- Inno Setup 6：[官网下载](https://jrsoftware.org/isinfo.php) 默认安装即可，
+  `release.bat` 会从 `Program Files (x86)\Inno Setup 6` 自动找 `ISCC.exe`
+- 中文界面用户额外下载 `ChineseSimplified.isl` 放到 Inno Setup 的 `Languages\` 目录
+
+### 一键发布
 
 ```bat
 scripts\release.bat
 ```
 
-产物：
+脚本顺序干这几件事：
 
-- `dist\MyTerm.exe` — PyInstaller 单文件
-- `dist\MyTerm-Setup-<version>.exe` — Inno Setup 安装包
+1. 从 `version.py` 读 `__version__`
+2. `python scripts\make_icon.py` 把 `icon.png` 转多尺寸 `icon.ico`
+3. 清空 `build/` `dist/`，跑 `python -m PyInstaller myterm.spec` 出 `dist\MyTerm.exe`
+4. 跑 Inno Setup 编译 `installer\myterm.iss`，出 `dist\MyTerm-Setup-<version>.exe`
 
-发布前置依赖、目录约定、首启迁移、spec 细节等见 [docs/packaging.md](docs/packaging.md)。
+### 产物
 
-发新版只需改 `version.py` 里的 `__version__`，再跑 `scripts\release.bat`。
+- `dist\MyTerm.exe` — 单文件 EXE（约 50 MB），可直接分发，双击运行
+- `dist\MyTerm-Setup-<version>.exe` — Inno Setup 安装包，用户级安装到
+  `%LOCALAPPDATA%\Programs\MyTerm\`，无需管理员权限，自动建开始菜单快捷方式
+
+> `build/` `dist/` `icon.ico` 都是构建派生物，已经在 `.gitignore` 中，
+> 不入库。需要分发安装包时，把 `dist\MyTerm-Setup-<version>.exe` 上传到
+> Releases 页面或内部分发渠道。
+
+### 发新版
+
+1. 改 `version.py` 的 `__version__`
+2. `scripts\release.bat`
+3. 把 `dist\MyTerm-Setup-<version>.exe` 上传到分发渠道
+
+### 单步打包
+
+只想出 EXE，不打安装包：
+
+```bash
+python -m PyInstaller myterm.spec
+```
+
+只想用现成 EXE 重新打安装包：
+
+```bat
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer\myterm.iss
+```
+
+清理后重来：
+
+```bash
+rm -rf build dist
+```
+
+更详细的运行时目录约定、首启迁移、spec 关键设定见 [docs/packaging.md](docs/packaging.md)。
 
 ## 依赖
 
