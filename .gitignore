@@ -4,3 +4,10 @@ path_history.json
 .paste_cache/
 WindTerm-master/
 .claude/
+
+# PyInstaller 产物
+build/
+dist/
+
+# 由 scripts/make_icon.py 从 icon.png 生成，不入库
+icon.ico
