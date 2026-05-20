@@ -1,29 +1,29 @@
 """应用配置：终端槽位上限与 shell 预设。
 
-配置文件位于工程根目录 `config.json`，与 `path_history.json` 同档。
-首次启动若文件不存在会主动写出一份默认配置，便于用户后续编辑。
-配置改动需要重启 MyTerm 才会生效（不支持热加载）。
+设计取舍：MyTerm 是单用户工具，"通过 config.json 让用户自定义预设"这种
+通用化能力没有真实需求，反而带来"代码默认值与磁盘文件双份"的维护成本。
+所以这里把配置直接硬编码在常量里——要改预设就改这个文件再重新打包。
+
+`max_terminals` 同理写常量。`_HARD_MAX_TERMINALS` 仍保留是因为它表达的是
+"再大就不可用"的硬约束，跟用户偏好无关。
 """
 from __future__ import annotations
 
-import json
-import os
-import sys
 from dataclasses import dataclass
-from typing import Any
 
 
 # 3×3 网格在默认窗口尺寸 (1100×650) 下每槽位约 360×210，
 # 已是终端可读的下限。再大的网格槽位会拥挤到不可用，故强制 clamp。
 _HARD_MAX_TERMINALS = 9
 
-_DEFAULT_MAX_TERMINALS = 4
-_DEFAULT_SHELL_PRESETS: list[dict[str, Any]] = [
-    {"label": "powershell",      "command": ["powershell.exe"]},
-    {"label": "claude -r",       "command": ["powershell.exe", "-NoExit", "-Command", "claude -r"]},
-    {"label": "codebuddy",       "command": ["powershell.exe", "-NoExit", "-Command", "codebuddy"]},
-    {"label": "claude-internal", "command": ["powershell.exe", "-NoExit", "-Command", "claude-internal"]},
-    {"label": "cmd",             "command": ["cmd.exe"]},
+MAX_TERMINALS = 4
+
+SHELL_PRESETS_RAW: list[tuple[str, list[str]]] = [
+    ("powershell",      ["powershell.exe"]),
+    ("claude -r",       ["powershell.exe", "-NoExit", "-Command", "claude -r"]),
+    ("codebuddy",       ["powershell.exe", "-NoExit", "-Command", "codebuddy"]),
+    ("claude-internal", ["powershell.exe", "-NoExit", "-Command", "claude-internal"]),
+    ("cmd",             ["cmd.exe"]),
 ]
 
 
@@ -38,7 +38,7 @@ def compute_grid_shape(n: int) -> tuple[int, int]:
     """求容纳 n 个 tile 的最接近正方形的 (rows, cols)，列优先（适合横向窗口）。
 
     1->1×1, 2->1×2, 3->2×2, 4->2×2, 5/6->2×3, 7/8/9->3×3。
-    要求 rows*cols >= n；优先 |rows-cols| 最小，其次 rows*cols-n 最小，
+    要求 rows*cols >= n；优先 |rows-cols| 最小，其次 rows*cols-n 最小,
     平手时偏好 rows<=cols（横向窗口下行少列多更舒服）。
     """
     if n <= 0:
@@ -64,19 +64,13 @@ def compute_grid_shape(n: int) -> tuple[int, int]:
 
 
 class AppConfig:
-    """加载、规范化、必要时落盘默认配置。"""
+    """从模块常量构造配置。保留类形态是为了 main_window 的现有调用点不变。"""
 
-    def __init__(self, filepath: str | None = None) -> None:
-        if filepath is None:
-            from store.paths import app_data_dir, config_path, ensure_dir
-            ensure_dir(app_data_dir())
-            filepath = str(config_path())
-        self._filepath = filepath
-        self._max_terminals = _DEFAULT_MAX_TERMINALS
+    def __init__(self) -> None:
+        self._max_terminals = min(max(MAX_TERMINALS, 1), _HARD_MAX_TERMINALS)
         self._shell_presets: list[ShellPreset] = [
-            ShellPreset(p["label"], list(p["command"])) for p in _DEFAULT_SHELL_PRESETS
+            ShellPreset(label, list(cmd)) for label, cmd in SHELL_PRESETS_RAW
         ]
-        self._load()
 
     @property
     def max_terminals(self) -> int:
@@ -85,71 +79,3 @@ class AppConfig:
     @property
     def shell_presets(self) -> list[ShellPreset]:
         return list(self._shell_presets)
-
-    # --- internal ---
-
-    def _load(self) -> None:
-        if not os.path.exists(self._filepath):
-            self._write_default()
-            return
-        try:
-            with open(self._filepath, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError) as e:
-            print(
-                f"[config] 配置文件读取失败，将使用默认值（原文件未改动）: {e}",
-                file=sys.stderr,
-            )
-            return
-
-        if not isinstance(data, dict):
-            print(
-                "[config] 配置根节点必须是对象，已用默认值（原文件未改动）",
-                file=sys.stderr,
-            )
-            return
-
-        self._max_terminals = self._parse_max_terminals(data.get("max_terminals"))
-        self._shell_presets = self._parse_shell_presets(data.get("shell_presets"))
-
-    def _write_default(self) -> None:
-        default = {
-            "max_terminals": _DEFAULT_MAX_TERMINALS,
-            "shell_presets": _DEFAULT_SHELL_PRESETS,
-        }
-        try:
-            with open(self._filepath, "w", encoding="utf-8") as f:
-                json.dump(default, f, ensure_ascii=False, indent=2)
-        except OSError as e:
-            print(f"[config] 写入默认配置失败，仅在内存使用默认值: {e}", file=sys.stderr)
-
-    @staticmethod
-    def _parse_max_terminals(value: Any) -> int:
-        if not isinstance(value, int) or isinstance(value, bool):
-            return _DEFAULT_MAX_TERMINALS
-        if value < 1:
-            return 1
-        if value > _HARD_MAX_TERMINALS:
-            return _HARD_MAX_TERMINALS
-        return value
-
-    @staticmethod
-    def _parse_shell_presets(value: Any) -> list[ShellPreset]:
-        if not isinstance(value, list):
-            return [ShellPreset(p["label"], list(p["command"])) for p in _DEFAULT_SHELL_PRESETS]
-        cleaned: list[ShellPreset] = []
-        for item in value:
-            if not isinstance(item, dict):
-                continue
-            label = item.get("label")
-            command = item.get("command")
-            if not isinstance(label, str) or not label:
-                continue
-            if not isinstance(command, list) or not command:
-                continue
-            if not all(isinstance(arg, str) for arg in command):
-                continue
-            cleaned.append(ShellPreset(label, list(command)))
-        if not cleaned:
-            return [ShellPreset(p["label"], list(p["command"])) for p in _DEFAULT_SHELL_PRESETS]
-        return cleaned

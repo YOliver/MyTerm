@@ -3,14 +3,16 @@
 区分两种运行模式：
 
 - **打包模式**（PyInstaller，``sys.frozen=True``）
-  配置/历史/缓存全部落到 Windows 标准目录，避免污染安装目录。
+  历史/缓存落到 Windows 标准目录，避免污染安装目录。
 
-  - 用户配置（``config.json``）→ ``%APPDATA%/MyTerm``
   - 本机数据（``path_history.json`` 等）→ ``%LOCALAPPDATA%/MyTerm``
   - 缓存（粘贴图片等可随时删的）→ ``%LOCALAPPDATA%/MyTerm/Cache/<sub>``
 
 - **开发模式**（直接 ``python main.py``）
   全部落到工程根，git 里能直接看到、调试方便，不污染 AppData。
+
+shell 预设与槽位上限不通过文件配置（见 ``store/config.py``），所以这里
+不再有 ``config_path()``。
 
 任何 IO 失败都不抛异常：能做就做、做不了打 stderr，让上层各自决定降级。
 """
@@ -52,18 +54,6 @@ def _env_dir(var: str, fallback: Path) -> Path:
     return fallback
 
 
-def app_data_dir() -> Path:
-    """用户配置目录。
-
-    打包模式：``%APPDATA%/MyTerm``（Roaming，跟随域账户）。
-    开发模式：工程根。
-    """
-    if is_frozen():
-        roaming = _env_dir("APPDATA", Path.home() / "AppData" / "Roaming")
-        return roaming / APP_NAME
-    return project_root()
-
-
 def local_data_dir() -> Path:
     """本机数据目录（不漫游）。
 
@@ -92,11 +82,6 @@ def cache_dir(sub: str = "") -> Path:
     return project_root() / ".cache" / sub if sub else project_root() / ".cache"
 
 
-def config_path() -> Path:
-    """``config.json`` 全路径。"""
-    return app_data_dir() / "config.json"
-
-
 def path_history_path() -> Path:
     """``path_history.json`` 全路径。"""
     return local_data_dir() / "path_history.json"
@@ -112,28 +97,29 @@ def ensure_dir(p: Path) -> Path:
 
 
 def migrate_legacy_files() -> None:
-    """打包后首次启动，把旧位置的用户文件搬到 AppData。
+    """打包后首次启动，把旧位置的用户文件搬到 LOCALAPPDATA。
 
     搬迁源（按优先级）：exe 同目录 → 工程根（仅开发态升级路径，理论上 frozen 时为空）。
-    搬迁目标：app_data_dir / local_data_dir。
-    搬完后在 app_data_dir 写一个空哨兵 ``.migrated``，下次直接跳过。
+    搬迁目标：``local_data_dir``。
+    搬完后写一个空哨兵 ``.migrated``，下次直接跳过。
+
+    仅迁 ``path_history.json``——MyTerm 现在没有用户级配置文件了，
+    shell 预设/槽位上限都硬编码在 ``store/config.py`` 里。
 
     任何失败都吞掉、打 stderr。绝不让迁移挡住程序启动。
     """
     if not is_frozen():
         return
 
-    target_app = app_data_dir()
-    sentinel = target_app / _MIGRATION_SENTINEL
+    target = local_data_dir()
+    sentinel = target / _MIGRATION_SENTINEL
     if sentinel.exists():
         return
 
-    ensure_dir(target_app)
-    ensure_dir(local_data_dir())
+    ensure_dir(target)
 
     # (源相对名, 目标绝对路径)
     plan: list[tuple[str, Path]] = [
-        ("config.json", config_path()),
         ("path_history.json", path_history_path()),
     ]
 

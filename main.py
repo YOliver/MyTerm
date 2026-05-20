@@ -17,7 +17,7 @@ ICON_PATH = _resource_path("icon.png")
 
 
 def main():
-    # 打包模式首次启动把旧位置的 config.json/path_history.json 搬到 AppData。
+    # 打包模式首次启动把旧位置的 path_history.json 搬到 LOCALAPPDATA。
     # 开发态空操作，无副作用。
     migrate_legacy_files()
 
