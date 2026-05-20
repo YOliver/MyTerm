@@ -102,6 +102,12 @@ class TerminalWidget(QWidget):
     _ctrlmap = {
         Qt.Key.Key_D: "\x04", Qt.Key.Key_Z: "\x1a",
         Qt.Key.Key_A: "\x01", Qt.Key.Key_E: "\x05", Qt.Key.Key_L: "\x0c",
+        # 行编辑：让 shell（PSReadLine / bash readline 等）按各自约定处理。
+        # MyTerm 不知道当前提示符里有几个字，只能透传控制字节，删多少由 shell 决定。
+        Qt.Key.Key_W: "\x17",          # Ctrl+W           删除光标前一个单词
+        Qt.Key.Key_U: "\x15",          # Ctrl+U           删除从光标到行首
+        Qt.Key.Key_K: "\x0b",          # Ctrl+K           删除从光标到行尾
+        Qt.Key.Key_Backspace: "\x17",  # Ctrl+Backspace   Windows 习惯，等同 Ctrl+W
     }
 
     def __init__(self, backend, parent=None):
@@ -361,7 +367,9 @@ class TerminalWidget(QWidget):
                 return
 
         seq = self._keymap.get(key)
-        if seq is not None:
+        if seq is not None and not (modifiers & Qt.KeyboardModifier.ControlModifier):
+            # 仅在没按 Ctrl 时走 _keymap：否则 Ctrl+Backspace 这类组合会被
+            # _keymap[Backspace]=\x7f 抢走，永远进不到下面 Ctrl 分支里的 _ctrlmap。
             self._backend.write(seq)
             return
 
@@ -382,6 +390,11 @@ class TerminalWidget(QWidget):
             if key == Qt.Key.Key_V:
                 self._paste_from_clipboard()
                 return
+
+        # Ctrl 分支没消化掉的非字符键（比如 Ctrl+方向键）回退到 _keymap，避免被吞
+        if seq is not None:
+            self._backend.write(seq)
+            return
 
         if text:
             self._backend.write(text)
