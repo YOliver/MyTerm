@@ -45,6 +45,9 @@ ENV_SPECS: list[EnvSpec] = [
     EnvSpec("Python",    "python",    ["--version"], r"Python\s+(\d+\.\d+\.\d+)"),
     EnvSpec("Git",       "git",       ["--version"], r"git\s+version\s+(\d+\.\d+\.\d+)"),
     EnvSpec("claude",    "claude",    ["--version"], r"(\d+\.\d+\.\d+)"),
+    # claude-internal --version 输出形如「版本号: 1.1.7」后跟欢迎语 + 帮助；
+    # 用「版本号」锚定首段版本，避免欢迎语里别的版本号被误抓。
+    EnvSpec("claude-internal", "claude-internal", ["--version"], r"版本号[:：]\s*(\d+\.\d+\.\d+)"),
     EnvSpec("codebuddy", "codebuddy", ["--version"], r"(\d+\.\d+\.\d+)"),
 ]
 
@@ -53,6 +56,21 @@ def parse_version(output: str, pattern: str) -> str | None:
     """从命令行输出里提取版本号；找不到返回 None（不抛异常）。"""
     m = re.search(pattern, output)
     return m.group(1) if m else None
+
+
+def _decode_output(data: bytes) -> str:
+    """把子进程原始字节解码成文本：UTF-8 优先，失败回退 GBK，再失败用 replace 兜底。
+
+    背景：Windows 上 subprocess(text=True) 默认按系统 locale（中文环境多为 cp936/GBK）
+    解码 stdout。但越来越多的现代 CLI（如 claude-internal）输出 UTF-8 字节流，
+    在 GBK 下会变成乱码，导致中文锚点失配、版本号提取失败。这里手动解码绕开。
+    """
+    for enc in ("utf-8", "gbk"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
 
 
 def check_one(spec: EnvSpec, timeout: float = 3.0) -> EnvResult:
@@ -73,10 +91,11 @@ def check_one(spec: EnvSpec, timeout: float = 3.0) -> EnvResult:
         flags = 0
         if sys.platform == "win32":
             flags = subprocess.CREATE_NO_WINDOW
+        # 不传 text=True：自己拿 bytes 再按 UTF-8/GBK 顺序解码，
+        # 避免 GUI/EXE 环境下用系统 locale（GBK）误读 UTF-8 工具输出。
         result = subprocess.run(
             [path, *spec.version_args],
             capture_output=True,
-            text=True,
             timeout=timeout,
             creationflags=flags,
         )
@@ -86,7 +105,7 @@ def check_one(spec: EnvSpec, timeout: float = 3.0) -> EnvResult:
         return EnvResult(spec.name, True, None, path, str(e))
 
     # stdout 与 stderr 都看：有些工具把版本号写到 stderr（比如老版 java）
-    out = (result.stdout or "") + "\n" + (result.stderr or "")
+    out = _decode_output(result.stdout or b"") + "\n" + _decode_output(result.stderr or b"")
     version = parse_version(out, spec.version_pattern)
     return EnvResult(spec.name, True, version, path, None)
 
