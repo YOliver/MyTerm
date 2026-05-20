@@ -1,5 +1,3 @@
-import os
-
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
 from PySide6.QtCore import Qt, QTimer, QEvent, QRectF
@@ -8,11 +6,11 @@ import pyte
 import wcwidth
 
 from store.clipboard_image import format_path_for_pty, save_clipboard_image
+from store.paths import cache_dir
 
 
-# 工程根目录下的图片粘贴缓存目录。剪贴板含图时落盘到这里，已在 .gitignore 中。
-_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_PASTE_CACHE_DIR = os.path.join(_PROJECT_ROOT, ".paste_cache")
+# 图片粘贴缓存目录：开发态 .paste_cache/，打包态 %LOCALAPPDATA%/MyTerm/Cache/paste/
+_PASTE_CACHE_DIR = str(cache_dir("paste"))
 
 
 DEFAULT_FG = QColor(192, 192, 192)

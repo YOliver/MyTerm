@@ -1,0 +1,158 @@
+"""应用数据路径解析。
+
+区分两种运行模式：
+
+- **打包模式**（PyInstaller，``sys.frozen=True``）
+  配置/历史/缓存全部落到 Windows 标准目录，避免污染安装目录。
+
+  - 用户配置（``config.json``）→ ``%APPDATA%/MyTerm``
+  - 本机数据（``path_history.json`` 等）→ ``%LOCALAPPDATA%/MyTerm``
+  - 缓存（粘贴图片等可随时删的）→ ``%LOCALAPPDATA%/MyTerm/Cache/<sub>``
+
+- **开发模式**（直接 ``python main.py``）
+  全部落到工程根，git 里能直接看到、调试方便，不污染 AppData。
+
+任何 IO 失败都不抛异常：能做就做、做不了打 stderr，让上层各自决定降级。
+"""
+from __future__ import annotations
+
+import os
+import shutil
+import sys
+from pathlib import Path
+
+APP_NAME = "MyTerm"
+
+# 仅在打包模式做迁移；在被迁移过一次后写入空哨兵，避免反复尝试。
+_MIGRATION_SENTINEL = ".migrated"
+
+
+def is_frozen() -> bool:
+    """是否运行在 PyInstaller 打包后的 exe 里。"""
+    return bool(getattr(sys, "frozen", False))
+
+
+def project_root() -> Path:
+    """开发模式下的工程根：本文件父目录的父目录。"""
+    return Path(__file__).resolve().parent.parent
+
+
+def _exe_dir() -> Path:
+    """打包模式下 exe 所在目录；开发模式同 project_root。"""
+    if is_frozen():
+        return Path(sys.executable).resolve().parent
+    return project_root()
+
+
+def _env_dir(var: str, fallback: Path) -> Path:
+    """读环境变量为目录路径；空/缺失则用 fallback。"""
+    raw = os.environ.get(var)
+    if raw:
+        return Path(raw)
+    return fallback
+
+
+def app_data_dir() -> Path:
+    """用户配置目录。
+
+    打包模式：``%APPDATA%/MyTerm``（Roaming，跟随域账户）。
+    开发模式：工程根。
+    """
+    if is_frozen():
+        roaming = _env_dir("APPDATA", Path.home() / "AppData" / "Roaming")
+        return roaming / APP_NAME
+    return project_root()
+
+
+def local_data_dir() -> Path:
+    """本机数据目录（不漫游）。
+
+    打包模式：``%LOCALAPPDATA%/MyTerm``。
+    开发模式：工程根。
+    """
+    if is_frozen():
+        local = _env_dir("LOCALAPPDATA", Path.home() / "AppData" / "Local")
+        return local / APP_NAME
+    return project_root()
+
+
+def cache_dir(sub: str = "") -> Path:
+    """缓存目录。``sub`` 是子目录名，例如 ``"paste"``。
+
+    打包模式：``%LOCALAPPDATA%/MyTerm/Cache[/<sub>]``。
+    开发模式：工程根下的隐藏目录，沿用历史命名 ``.paste_cache``（仅 sub=='paste'），
+    其它 sub 使用 ``.cache/<sub>``。
+    """
+    if is_frozen():
+        base = local_data_dir() / "Cache"
+        return base / sub if sub else base
+    # 开发模式：保持向后兼容
+    if sub == "paste":
+        return project_root() / ".paste_cache"
+    return project_root() / ".cache" / sub if sub else project_root() / ".cache"
+
+
+def config_path() -> Path:
+    """``config.json`` 全路径。"""
+    return app_data_dir() / "config.json"
+
+
+def path_history_path() -> Path:
+    """``path_history.json`` 全路径。"""
+    return local_data_dir() / "path_history.json"
+
+
+def ensure_dir(p: Path) -> Path:
+    """mkdir -p；失败 stderr 后照样把 Path 还回去（让上层决定降级）。"""
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"[paths] 目录创建失败 {p}: {e}", file=sys.stderr)
+    return p
+
+
+def migrate_legacy_files() -> None:
+    """打包后首次启动，把旧位置的用户文件搬到 AppData。
+
+    搬迁源（按优先级）：exe 同目录 → 工程根（仅开发态升级路径，理论上 frozen 时为空）。
+    搬迁目标：app_data_dir / local_data_dir。
+    搬完后在 app_data_dir 写一个空哨兵 ``.migrated``，下次直接跳过。
+
+    任何失败都吞掉、打 stderr。绝不让迁移挡住程序启动。
+    """
+    if not is_frozen():
+        return
+
+    target_app = app_data_dir()
+    sentinel = target_app / _MIGRATION_SENTINEL
+    if sentinel.exists():
+        return
+
+    ensure_dir(target_app)
+    ensure_dir(local_data_dir())
+
+    # (源相对名, 目标绝对路径)
+    plan: list[tuple[str, Path]] = [
+        ("config.json", config_path()),
+        ("path_history.json", path_history_path()),
+    ]
+
+    sources = [_exe_dir(), project_root()]
+    for rel, dst in plan:
+        if dst.exists():
+            continue  # 目标已有，不覆盖
+        for src_dir in sources:
+            src = src_dir / rel
+            if src.is_file():
+                try:
+                    shutil.copy2(src, dst)
+                    print(f"[paths] 迁移 {src} -> {dst}", file=sys.stderr)
+                except OSError as e:
+                    print(f"[paths] 迁移失败 {src} -> {dst}: {e}", file=sys.stderr)
+                break
+
+    # 写哨兵（即便没搬任何东西也写，避免每次启动重扫）
+    try:
+        sentinel.write_text("", encoding="utf-8")
+    except OSError as e:
+        print(f"[paths] 哨兵写入失败 {sentinel}: {e}", file=sys.stderr)

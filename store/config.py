@@ -68,10 +68,9 @@ class AppConfig:
 
     def __init__(self, filepath: str | None = None) -> None:
         if filepath is None:
-            filepath = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "config.json",
-            )
+            from store.paths import app_data_dir, config_path, ensure_dir
+            ensure_dir(app_data_dir())
+            filepath = str(config_path())
         self._filepath = filepath
         self._max_terminals = _DEFAULT_MAX_TERMINALS
         self._shell_presets: list[ShellPreset] = [

@@ -5,10 +5,9 @@ import os
 class PathHistory:
     def __init__(self, filepath=None):
         if filepath is None:
-            filepath = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "path_history.json"
-            )
+            from store.paths import ensure_dir, local_data_dir, path_history_path
+            ensure_dir(local_data_dir())
+            filepath = str(path_history_path())
         self._filepath = filepath
         self._paths = self._load()
 
