@@ -33,7 +33,7 @@ python -m PyInstaller myterm.spec
 只想编译已有 exe 的安装包：
 
 ```bat
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.0 installer\myterm.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.1 installer\myterm.iss
 ```
 
 清理重来：
@@ -57,10 +57,12 @@ rm -rf build dist
 
 | 用途           | 路径                                          | 说明                       |
 | -------------- | --------------------------------------------- | -------------------------- |
-| 用户配置       | `%APPDATA%\MyTerm\config.json`                | 跟随域账户漫游             |
 | 路径历史       | `%LOCALAPPDATA%\MyTerm\path_history.json`     | 仅本机                     |
 | 粘贴图片缓存   | `%LOCALAPPDATA%\MyTerm\Cache\paste\`          | 可随时删                   |
-| 迁移哨兵       | `%APPDATA%\MyTerm\.migrated`                  | 标记已迁过，避免重复扫描   |
+| 迁移哨兵       | `%LOCALAPPDATA%\MyTerm\.migrated`             | 标记已迁过，避免重复扫描   |
+
+> shell 预设与终端槽位上限直接写在 `store/config.py` 的模块常量里，不再有
+> `config.json`。改预设就改代码、重新打包。
 
 开发模式（直接 `python main.py`）路径全部仍在工程根，与打包前完全一致，
 便于调试与 git 追踪。
@@ -70,23 +72,27 @@ rm -rf build dist
 打包版第一次启动会调用 `migrate_legacy_files()`：
 
 1. 仅 `sys.frozen=True` 触发；开发模式空操作。
-2. 若 `%APPDATA%\MyTerm\.migrated` 已存在，直接返回（幂等）。
-3. 按优先级 **exe 同目录 → 工程根** 找 `config.json` / `path_history.json`，
-   有就 `shutil.copy2` 到 AppData，目标已存在则不覆盖。
+2. 若 `%LOCALAPPDATA%\MyTerm\.migrated` 已存在，直接返回（幂等）。
+3. 按优先级 **exe 同目录 → 工程根** 找 `path_history.json`，有就
+   `shutil.copy2` 到 `%LOCALAPPDATA%\MyTerm\`，目标已存在则不覆盖。
 4. 无论搬没搬到，最后写空哨兵。
 
 任何 IO 失败都打 stderr，不抛异常、不挡启动。
 
 ## 完全重置（开发期手动）
 
-清掉用户数据（含已生成配置）：
+清掉用户数据：
 
 ```powershell
-Remove-Item -Recurse -Force "$env:APPDATA\MyTerm"
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\MyTerm"
 ```
 
-下次启动会重新创建默认 `config.json`。
+旧版本可能在 `%APPDATA%\MyTerm\` 下留过 `config.json` / `.migrated`，
+当前版本不再读它们，留着无害；想清干净也可以一并删掉：
+
+```powershell
+Remove-Item -Recurse -Force "$env:APPDATA\MyTerm"
+```
 
 ## 发布新版流程
 
@@ -101,3 +107,7 @@ Remove-Item -Recurse -Force "$env:LOCALAPPDATA\MyTerm"
 - `icon='icon.ico'`：Windows 资源图标。
 - `version=...`：把 `version.py` 写进 exe 文件属性，右键属性→详细信息可见。
 - `hiddenimports`：`pyte`/`pyte.screens`/`wcwidth`/`winpty` 显式列出防漏。
+- `binaries`：glob 收集 `winpty/` 包目录下所有 `.dll`/`.exe`（`winpty.dll`、
+  `conpty.dll`、`winpty-agent.exe`、`OpenConsole.exe`），dest 设为 `'winpty'`
+  子目录。PyInstaller 没有官方 `hook-winpty`，这 4 个 native 旁路文件不会
+  被自动收，缺它们子进程一启动就报 `-1073741510 (0xC000013A)`。
