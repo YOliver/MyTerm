@@ -39,6 +39,23 @@ def project_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def resource_path(name: str) -> Path:
+    """读取 PyInstaller 内嵌资源（spec 里 datas 字段声明的文件）。
+
+    - 打包模式：从 ``sys._MEIPASS`` 临时解压目录读
+    - 开发模式：从工程根读
+
+    ``name`` 用 POSIX 风格相对路径，例如 ``"docs/help/usage.md"``。
+    路径分隔符在 Path 拼接时由系统自适配，不必手动处理。
+
+    与 ``local_data_dir`` 的区别：那个管「用户运行时数据」（可读写），
+    这个管「应用内嵌资源」（只读、随 EXE 发布）。两套机制各管一摊。
+    """
+    base = getattr(sys, "_MEIPASS", None)
+    root = Path(base) if base else project_root()
+    return root / name
+
+
 def _exe_dir() -> Path:
     """打包模式下 exe 所在目录；开发模式同 project_root。"""
     if is_frozen():

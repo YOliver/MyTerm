@@ -82,6 +82,10 @@ a = Analysis(
     binaries=_winpty_binaries,
     datas=[
         ('icon.png', '.'),
+        # 帮助菜单内嵌的 Markdown 文档：保留原相对路径，运行时通过
+        # store.paths.resource_path("docs/help/...") 读取。
+        ('docs/help/usage.md', 'docs/help'),
+        ('docs/help/about.md', 'docs/help'),
     ],
     hiddenimports=[
         'pyte',

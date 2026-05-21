@@ -279,8 +279,26 @@ class MainWindow(QMainWindow):
         check_action = env_menu.addAction("检测依赖")
         check_action.triggered.connect(self._on_check_env)
 
+        help_menu = menubar.addMenu("帮助")
+        usage_action = help_menu.addAction("使用说明")
+        usage_action.triggered.connect(self._on_help_usage)
+        about_action = help_menu.addAction("软件信息")
+        about_action.triggered.connect(self._on_help_about)
+
     def _on_check_env(self):
         # 延迟 import：对话框模块只在用户点开菜单时加载，启动期不付代价
         from ui.env_check_dialog import EnvCheckDialog
         dlg = EnvCheckDialog(self)
         dlg.exec()
+
+    def _on_help_usage(self):
+        self._open_help("使用说明", "docs/help/usage.md")
+
+    def _on_help_about(self):
+        self._open_help("软件信息", "docs/help/about.md")
+
+    def _open_help(self, title: str, rel_path: str) -> None:
+        """统一帮助对话框入口：延迟 import + 内嵌资源路径解析。"""
+        from ui.help_dialog import HelpDialog
+        from store.paths import resource_path
+        HelpDialog(title, resource_path(rel_path), self).exec()

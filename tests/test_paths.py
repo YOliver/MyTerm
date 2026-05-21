@@ -69,6 +69,28 @@ def test_ensure_dir_idempotent(tmp_path):
     assert tmp_path.is_dir()
 
 
+# ---- 内嵌资源（datas）----
+
+
+def test_resource_path_dev_mode(monkeypatch):
+    """开发模式（无 sys._MEIPASS）：从工程根读。"""
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    assert paths_mod.resource_path("icon.png") == paths_mod.project_root() / "icon.png"
+
+
+def test_resource_path_frozen_mode(monkeypatch, tmp_path):
+    """打包模式（设了 sys._MEIPASS）：从临时解压目录读。"""
+    monkeypatch.setattr(sys, "_MEIPASS", str(tmp_path), raising=False)
+    assert paths_mod.resource_path("icon.png") == tmp_path / "icon.png"
+
+
+def test_resource_path_supports_subdirs(monkeypatch):
+    """子路径（POSIX 风格）能拼出正确的最终路径。"""
+    monkeypatch.delattr(sys, "_MEIPASS", raising=False)
+    expected = paths_mod.project_root() / "docs" / "help" / "usage.md"
+    assert paths_mod.resource_path("docs/help/usage.md") == expected
+
+
 # ---- 迁移逻辑 ----
 
 

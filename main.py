@@ -2,18 +2,12 @@ import sys
 import os
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
-from store.paths import migrate_legacy_files
+from store.paths import migrate_legacy_files, resource_path
 from ui.main_window import MainWindow
 from version import __version__
 
 
-def _resource_path(name: str) -> str:
-    """打包模式下读 PyInstaller 的 _MEIPASS 临时目录；开发模式读源码同目录。"""
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    return os.path.join(base, name)
-
-
-ICON_PATH = _resource_path("icon.png")
+ICON_PATH = str(resource_path("icon.png"))
 
 
 def main():
