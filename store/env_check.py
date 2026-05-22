@@ -1,10 +1,13 @@
-"""环境依赖检测：判断 node/npm/python/git/claude/codebuddy 等工具是否安装。
+"""环境依赖检测：判断 Node.js / npm / Python / Git 等基础工具是否安装。
 
 设计成不依赖 Qt 的纯逻辑模块，UI 层（EnvCheckWorker）通过 check_all 生成器
 拿到结果。版本号正则化提取，避免硬编码不同工具的输出格式。
 
+AI CLI（claude / codebuddy 等）由用户自由选装，归到「设置 → AI CLI 配置」管理，
+不在此处检测——能不能启动，下拉框选完点启动就知道。
+
 Windows 注意：
-- npm / claude / codebuddy 等通过 npm 全局安装的命令在 Windows 上是 .cmd 形态，
+- 通过 npm 全局安装的命令在 Windows 上是 .cmd 形态，
   shutil.which 会按 PATHEXT 匹配（不必显式带扩展名）
 - 子进程必须用 CREATE_NO_WINDOW，否则每检测一项闪一个 cmd 黑窗
 """
@@ -37,18 +40,13 @@ class EnvResult:
     error: str | None        # --version 超时或失败时填原因
 
 
-# 检测项写死在这里，不放 config.json：用户场景明确，配置化没收益。
-# 将来要加新工具就在这个列表里追加。
+# 检测项写死在这里：基础环境用户场景明确，不做配置化。
+# AI CLI 单独走 shell_presets.json，不在此列。
 ENV_SPECS: list[EnvSpec] = [
     EnvSpec("Node.js",   "node",      ["--version"], r"v?(\d+\.\d+\.\d+)"),
     EnvSpec("npm",       "npm",       ["--version"], r"(\d+\.\d+\.\d+)"),
     EnvSpec("Python",    "python",    ["--version"], r"Python\s+(\d+\.\d+\.\d+)"),
     EnvSpec("Git",       "git",       ["--version"], r"git\s+version\s+(\d+\.\d+\.\d+)"),
-    EnvSpec("claude",    "claude",    ["--version"], r"(\d+\.\d+\.\d+)"),
-    # claude-internal --version 输出形如「版本号: 1.1.7」后跟欢迎语 + 帮助；
-    # 用「版本号」锚定首段版本，避免欢迎语里别的版本号被误抓。
-    EnvSpec("claude-internal", "claude-internal", ["--version"], r"版本号[:：]\s*(\d+\.\d+\.\d+)"),
-    EnvSpec("codebuddy", "codebuddy", ["--version"], r"(\d+\.\d+\.\d+)"),
 ]
 
 
@@ -62,8 +60,8 @@ def _decode_output(data: bytes) -> str:
     """把子进程原始字节解码成文本：UTF-8 优先，失败回退 GBK，再失败用 replace 兜底。
 
     背景：Windows 上 subprocess(text=True) 默认按系统 locale（中文环境多为 cp936/GBK）
-    解码 stdout。但越来越多的现代 CLI（如 claude-internal）输出 UTF-8 字节流，
-    在 GBK 下会变成乱码，导致中文锚点失配、版本号提取失败。这里手动解码绕开。
+    解码 stdout。但越来越多的现代 CLI 输出 UTF-8 字节流，在 GBK 下会变成乱码，
+    导致中文锚点失配、版本号提取失败。这里手动解码绕开。
     """
     for enc in ("utf-8", "gbk"):
         try:

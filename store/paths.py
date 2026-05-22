@@ -104,6 +104,11 @@ def path_history_path() -> Path:
     return local_data_dir() / "path_history.json"
 
 
+def shell_presets_path() -> Path:
+    """``shell_presets.json`` 全路径。"""
+    return local_data_dir() / "shell_presets.json"
+
+
 def ensure_dir(p: Path) -> Path:
     """mkdir -p；失败 stderr 后照样把 Path 还回去（让上层决定降级）。"""
     try:

@@ -136,9 +136,6 @@ class MainWindow(QMainWindow):
         self._history.add(path)
         self._load_history()
         cmdline = list(self._config.shell_presets[self._shell_combo.currentIndex()].command)
-        if cmdline[-1] == "claude -r":
-            if not self._has_claude_session(path):
-                cmdline[-1] = "claude"
         self._add_terminal(path, cmdline)
 
     def _add_terminal(self, path, cmdline=None):
@@ -243,13 +240,6 @@ class MainWindow(QMainWindow):
         for i, slot in enumerate(tiles):
             self._grid.addWidget(slot.tile, i // cols, i % cols)
 
-    def _has_claude_session(self, path):
-        # Claude encodes D:\project\MyTerm -> D--project-MyTerm
-        name = path.replace(":\\", "--").replace("\\", "-").replace("/", "-")
-        session_dir = os.path.join(
-            os.path.expanduser("~"), ".claude", "projects", name)
-        return os.path.isdir(session_dir)
-
     def _load_history(self):
         paths = self._history.all()
         self._path_combo.clear()
@@ -279,6 +269,10 @@ class MainWindow(QMainWindow):
         check_action = env_menu.addAction("检测依赖")
         check_action.triggered.connect(self._on_check_env)
 
+        settings_menu = menubar.addMenu("设置")
+        shell_action = settings_menu.addAction("AI CLI 配置...")
+        shell_action.triggered.connect(self._on_open_settings)
+
         help_menu = menubar.addMenu("帮助")
         usage_action = help_menu.addAction("使用说明")
         usage_action.triggered.connect(self._on_help_usage)
@@ -290,6 +284,28 @@ class MainWindow(QMainWindow):
         from ui.env_check_dialog import EnvCheckDialog
         dlg = EnvCheckDialog(self)
         dlg.exec()
+
+    def _on_open_settings(self):
+        # 延迟 import 同上
+        from ui.shell_presets_dialog import ShellPresetsDialog
+        dlg = ShellPresetsDialog(self._config.shell_presets, self)
+        dlg.presets_changed.connect(self._on_presets_changed)
+        dlg.exec()
+
+    def _on_presets_changed(self, _new_presets):
+        """设置面板保存后：重读盘 + 重填启动下拉框，按 label 回填 currentIndex。
+
+        已开终端不动：backend 已经在跑，没必要重启。
+        """
+        self._config.reload_shell_presets()
+        old_label = self._shell_combo.currentText()
+        self._shell_combo.blockSignals(True)
+        self._shell_combo.clear()
+        for preset in self._config.shell_presets:
+            self._shell_combo.addItem(preset.label)
+        idx = self._shell_combo.findText(old_label)
+        self._shell_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self._shell_combo.blockSignals(False)
 
     def _on_help_usage(self):
         self._open_help("使用说明", "docs/help/usage.md")

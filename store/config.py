@@ -1,15 +1,12 @@
-"""应用配置：终端槽位上限与 shell 预设。
+"""应用配置：终端槽位上限。
 
-设计取舍：MyTerm 是单用户工具，"通过 config.json 让用户自定义预设"这种
-通用化能力没有真实需求，反而带来"代码默认值与磁盘文件双份"的维护成本。
-所以这里把配置直接硬编码在常量里——要改预设就改这个文件再重新打包。
+Shell / CLI 预设原本硬编码在这里，已迁移到 ``store/shell_presets.py``，
+通过 ``shell_presets.json`` 文件持久化、由「设置 → AI CLI 配置...」面板维护。
+本文件只剩槽位上限相关的常量与 ``AppConfig`` 入口。
 
-`max_terminals` 同理写常量。`_HARD_MAX_TERMINALS` 仍保留是因为它表达的是
-"再大就不可用"的硬约束，跟用户偏好无关。
+``_HARD_MAX_TERMINALS`` 表达「再大就不可用」的硬约束，跟用户偏好无关，所以仍写常量。
 """
 from __future__ import annotations
-
-from dataclasses import dataclass
 
 
 # 3×3 网格在默认窗口尺寸 (1100×650) 下每槽位约 360×210，
@@ -17,21 +14,6 @@ from dataclasses import dataclass
 _HARD_MAX_TERMINALS = 9
 
 MAX_TERMINALS = 4
-
-SHELL_PRESETS_RAW: list[tuple[str, list[str]]] = [
-    ("powershell",      ["powershell.exe"]),
-    ("claude -r",       ["powershell.exe", "-NoExit", "-Command", "claude -r"]),
-    ("codebuddy",       ["powershell.exe", "-NoExit", "-Command", "codebuddy"]),
-    ("claude-internal", ["powershell.exe", "-NoExit", "-Command", "claude-internal"]),
-    ("cmd",             ["cmd.exe"]),
-]
-
-
-@dataclass(frozen=True)
-class ShellPreset:
-    """一个 shell 启动预设：下拉框显示用的 label + 实际启动的 argv。"""
-    label: str
-    command: list[str]
 
 
 def compute_grid_shape(n: int) -> tuple[int, int]:
@@ -64,18 +46,24 @@ def compute_grid_shape(n: int) -> tuple[int, int]:
 
 
 class AppConfig:
-    """从模块常量构造配置。保留类形态是为了 main_window 的现有调用点不变。"""
+    """聚合槽位上限 + shell 预设入口。预设来自 ``shell_presets.json``。"""
 
     def __init__(self) -> None:
         self._max_terminals = min(max(MAX_TERMINALS, 1), _HARD_MAX_TERMINALS)
-        self._shell_presets: list[ShellPreset] = [
-            ShellPreset(label, list(cmd)) for label, cmd in SHELL_PRESETS_RAW
-        ]
+        # 延迟 import 避免 store 内部循环依赖（shell_presets 也用 store.paths）
+        from store import shell_presets
+        self._shell_presets_module = shell_presets
+        self._shell_presets = shell_presets.load()
 
     @property
     def max_terminals(self) -> int:
         return self._max_terminals
 
     @property
-    def shell_presets(self) -> list[ShellPreset]:
+    def shell_presets(self):
+        """返回当前预设的拷贝列表。外部 mutate 不会污染内部状态。"""
         return list(self._shell_presets)
+
+    def reload_shell_presets(self) -> None:
+        """重新读盘刷新预设。设置面板保存后由信号触发。"""
+        self._shell_presets = self._shell_presets_module.load()

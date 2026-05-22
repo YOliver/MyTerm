@@ -1,6 +1,7 @@
 __pycache__/
 .pytest_cache/
 path_history.json
+shell_presets.json
 .paste_cache/
 WindTerm-master/
 .claude/

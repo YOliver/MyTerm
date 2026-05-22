@@ -6,25 +6,87 @@ MyTerm 是一个 Windows 桌面终端模拟器，下面按界面区域 → 操�
 
 启动后窗口分三层：
 
-1. **菜单栏**：环境（依赖检测）、帮助（本说明 / 软件信息）
+1. **菜单栏**：环境（依赖检测）、设置（AI CLI 配置）、帮助（本说明 / 软件信息）
 2. **顶部工具栏**：工作目录下拉、Shell 预设下拉、浏览、启动
 3. **终端网格区**：底部主体，启动后在此显示终端
 
 ## 启动一个终端
 
 1. 在路径下拉框选历史目录，或点「浏览」选新目录（路径会自动加入历史）
-2. 选 Shell 预设（见下表）
+2. 选 Shell 预设（默认两条：`powershell` / `cmd`，其它由你自己在「设置 → AI CLI 配置」里加，见下文）
 3. 点「启动」——一个新终端会出现在网格区
 
-| 预设 | 说明 |
-|------|------|
-| powershell | 原生 PowerShell |
-| claude -r | PowerShell 中启动 `claude -r`（续接最近会话）；当前目录无历史会话时自动退化为 `claude` |
-| codebuddy | PowerShell 中启动 `codebuddy` |
-| claude-internal | PowerShell 中启动 `claude-internal` |
-| cmd | 原生 cmd.exe |
-
 每个终端 tile 顶部显示「目录名 + Shell 标签」，右上角 × 关闭。
+
+## AI CLI 配置
+
+下拉框里出现哪些 shell / AI CLI，完全由你自己配置。新装时只默认两条 `powershell` 和 `cmd`，其它按需自己加，这样新装一个 AI CLI 不用等软件升级。
+
+### 入口
+
+菜单栏 **设置 → AI CLI 配置...**
+
+### 字段说明
+
+| 字段 | 含义 |
+|------|------|
+| **标签** | 启动下拉框里显示的名字，也用来在保存后回填上次的选择 |
+| **宿主** | 三选一：`powershell` / `cmd` / `none`，决定外层怎么包裹你的命令 |
+| **命令** | 在宿主里要执行的命令 |
+
+### 宿主选哪个
+
+| 你的 AI CLI 长啥样 | 宿主 | 命令填什么 |
+|------|------|------|
+| npm 全局装的（`claude`、`codebuddy` 这种 .cmd 命令） | `powershell` | `claude` |
+| 想跑带参数的（如 `claude -r` 续接最近会话） | `powershell` | `claude -r` |
+| 习惯在 cmd 下跑 | `cmd` | `codebuddy` |
+| 直接启个 shell 本身（bash、wsl、pwsh 等） | `none` | `bash.exe` 或 `wsl.exe` |
+
+底层规则：
+
+- `powershell` → 自动包成 `powershell.exe -NoExit -Command <你的命令>`
+- `cmd` → 自动包成 `cmd.exe /K <你的命令>`（用 `/K` 不是 `/C`，命令跑完会保留 cmd 会话不闪退）
+- `none` → 直接当 argv，用 Windows 风格分词，**带空格的路径要用双引号包住**，例如：`"C:\Program Files\Git\bin\bash.exe" --login`
+
+### 操作按钮
+
+- **新增**：在选中行下方插入一行，自动进入编辑（默认值是 `新预设 / powershell / 空命令`）
+- **删除**：删选中行（至少保留一条）
+- **↑ / ↓**：调整顺序，顺序就是启动下拉框里的顺序
+- **保存**：写盘 + 立即刷新主窗口下拉框，**已开的终端不受影响**
+- **取消**：全部丢弃，不写盘
+
+### 几个常用配置示例
+
+```
+标签              宿主         命令
+─────────────────────────────────────────────────
+powershell        none         powershell.exe
+cmd               none         cmd.exe
+claude            powershell   claude
+claude -r         powershell   claude -r
+claude-internal   powershell   claude-internal
+codebuddy         powershell   codebuddy
+gemini            powershell   gemini
+git-bash          none         "C:\Program Files\Git\bin\bash.exe" --login
+wsl               none         wsl.exe
+```
+
+### 配置文件位置（想直接手改也行）
+
+`%LOCALAPPDATA%\MyTerm\shell_presets.json`，JSON 结构：
+
+```json
+{
+  "version": 1,
+  "presets": [
+    {"label": "claude", "host": "powershell", "command": "claude"}
+  ]
+}
+```
+
+文件损坏或字段非法时**不会覆盖你的手改**，会回退到默认两条并在错误日志里给出提示；启动后从「设置」面板里再保存一次即可重新生成正确的文件。
 
 ## 多终端布局
 
@@ -85,17 +147,19 @@ MyTerm 是一个 Windows 桌面终端模拟器，下面按界面区域 → 操�
 
 ## 环境检测
 
-菜单栏 **环境 → 检测依赖** 可一次性检查本机以下工具的安装状态与版本：
+菜单栏 **环境 → 检测依赖** 可一次性检查本机以下基础工具的安装状态与版本：
 
 - Node.js / npm
 - Python / Git
-- claude / claude-internal / codebuddy
 
 每项显示版本号、可执行文件路径，未安装或调用超时会有相应提示。
+
+> AI CLI（claude / codebuddy 等）不在此处检测——它们由你自己装、自己在「设置 → AI CLI 配置」里登记，能不能跑起来在下拉框里点启动就知道。
 
 ## 数据存储位置
 
 - 路径历史：`%LOCALAPPDATA%\MyTerm\path_history.json`
+- AI CLI 预设：`%LOCALAPPDATA%\MyTerm\shell_presets.json`
 - 粘贴的图片缓存：`%LOCALAPPDATA%\MyTerm\Cache\paste\`
 
 卸载时不会删除以上数据。
