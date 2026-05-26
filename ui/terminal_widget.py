@@ -3,6 +3,7 @@ from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEve
 from PySide6.QtCore import Qt, QTimer, QEvent, QRectF
 from pyte.screens import HistoryScreen
 import pyte
+import weakref
 import wcwidth
 
 from store.clipboard_image import format_path_for_pty, save_clipboard_image
@@ -89,6 +90,13 @@ def cell_width(ch: str) -> int:
 
 
 class TerminalWidget(QWidget):
+    # 跨实例「当前选区持有者」弱引用：
+    # 用户在 A 终端拖出选区、再到 B 终端右键时，B 需要拿到 A 的选区文本来复制。
+    # 用 weakref 不阻止 widget 析构；多实例时只跟踪「最近一次产生选区」的那个，
+    # 与 Windows Terminal 的「最后一次选区」语义一致。任何路径清空选区时都要
+    # 把这里同步清掉，避免引用悬空。
+    _selection_owner: "weakref.ReferenceType[TerminalWidget] | None" = None
+
     _keymap = {
         Qt.Key.Key_Backspace: "\x7f",
         Qt.Key.Key_Return: "\r", Qt.Key.Key_Enter: "\r",
@@ -153,8 +161,10 @@ class TerminalWidget(QWidget):
     def _on_data(self, data):
         self._stream.feed(data)
         self._scroll_offset = 0
-        self._sel_start = None
-        self._sel_end = None
+        # 收到 PTY 新输出会让选区坐标失效（屏幕滚动 / 内容覆盖），统一清掉。
+        # 走 _clear_selection 是为了同时解除全局 _selection_owner 引用，
+        # 否则其它终端右键时还能"复制"到一段早已不存在的内容。
+        self._clear_selection(repaint=False)
         self.update()
 
     def _on_exit(self, exit_code):
@@ -416,25 +426,71 @@ class TerminalWidget(QWidget):
         """实例侧的便捷封装，逻辑见模块级 `is_real_selection`。"""
         return is_real_selection(self._sel_start, self._sel_end)
 
+    def _set_selection_owner(self) -> None:
+        """声明"我现在持有选区"。供跨实例右键复制时反查文本来源。"""
+        TerminalWidget._selection_owner = weakref.ref(self)
+
+    def _clear_selection(self, repaint: bool = True) -> None:
+        """统一的"清掉本实例选区"入口：清状态 + 解除全局所有权 + 可选重绘。
+
+        多个清空路径（_on_data / _copy_selection / 右键消化掉选区 / mousePressEvent
+        擦假选区）都走这里，避免某条分支忘了把 _selection_owner 复位。
+        """
+        had = self._sel_start is not None or self._sel_end is not None
+        self._sel_start = None
+        self._sel_end = None
+        owner = TerminalWidget._selection_owner
+        if owner is not None and owner() is self:
+            TerminalWidget._selection_owner = None
+        if repaint and had:
+            self.update()
+
+    @classmethod
+    def _peek_other_selection_text(cls, exclude: "TerminalWidget") -> str:
+        """若有另一个 TerminalWidget 当前持有选区，返回其文本；否则空串。
+
+        ``exclude`` 是发起方（右键被点的 widget），它自己有选区时由调用方先处理，
+        这里专门处理"别的实例持有选区"的跨终端场景。
+        """
+        owner_ref = cls._selection_owner
+        if owner_ref is None:
+            return ""
+        owner = owner_ref()
+        if owner is None or owner is exclude:
+            return ""
+        if not owner._has_real_selection():
+            return ""
+        return owner._get_selected_text()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.RightButton:
-            # 有真实选区：粘选区，不走剪贴板；否则回退到剪贴板（行为类似 Windows Terminal）
+            # 优先级：本实例选区 > 其它终端实例选区 > 剪贴板。
+            # 跨终端的"在 A 选 → 在 B 右键"场景靠 _selection_owner 全局引用支持，
+            # 行为对齐 Windows Terminal：右键既能粘贴也能"把上一段选区发到这里"。
             if self._has_real_selection():
                 text = self._get_selected_text()
                 if text:
                     self._backend.write(text)
-                self._sel_start = None
-                self._sel_end = None
-                self.update()
-            else:
-                # 顺手把可能存在的"假选区"（左键单击残留）清掉，避免后续渲染异常
-                if self._sel_start is not None:
-                    self._sel_start = None
-                    self._sel_end = None
-                    self.update()
-                self._paste_from_clipboard()
+                self._clear_selection()
+                return
+            cross_text = TerminalWidget._peek_other_selection_text(exclude=self)
+            if cross_text:
+                self._backend.write(cross_text)
+                # 消化掉源端的选区：与同终端右键一致的语义（选完一次就用掉）
+                owner_ref = TerminalWidget._selection_owner
+                owner = owner_ref() if owner_ref is not None else None
+                if owner is not None:
+                    owner._clear_selection()
+                return
+            # 顺手把可能存在的"假选区"（左键单击残留）清掉，避免后续渲染异常
+            if self._sel_start is not None:
+                self._clear_selection()
+            self._paste_from_clipboard()
             return
         if event.button() == Qt.MouseButton.LeftButton:
+            # 切换选区源：原来的持有者（可能是别的终端）让位给当前实例。
+            # 同实例情况下 _set_selection_owner 仍要在 mouseMove/release 后调；
+            # 这里只做"开始一次新拖动"的状态重置。
             self._sel_start = self._pos_to_cell(event.pos())
             self._sel_end = None
         super().mousePressEvent(event)
@@ -442,6 +498,9 @@ class TerminalWidget(QWidget):
     def mouseMoveEvent(self, event):
         if self._sel_start is not None:
             self._sel_end = self._pos_to_cell(event.pos())
+            if self._has_real_selection():
+                # 拖出真实范围才声明"我是选区源"，避免误把单击残留登记为源
+                self._set_selection_owner()
             self.update()
         super().mouseMoveEvent(event)
 
@@ -449,6 +508,8 @@ class TerminalWidget(QWidget):
         if event.button() == Qt.MouseButton.LeftButton and self._sel_start is not None:
             if self._sel_end is None:
                 self._sel_end = self._sel_start
+            if self._has_real_selection():
+                self._set_selection_owner()
             self.update()
         super().mouseReleaseEvent(event)
 
@@ -474,6 +535,8 @@ class TerminalWidget(QWidget):
                         break
                 self._sel_start = (row, start_col)
                 self._sel_end = (row, end_col)
+                if self._has_real_selection():
+                    self._set_selection_owner()
                 self.update()
         super().mouseDoubleClickEvent(event)
 
@@ -526,9 +589,7 @@ class TerminalWidget(QWidget):
         text = self._get_selected_text()
         if text:
             QApplication.clipboard().setText(text)
-        self._sel_start = None
-        self._sel_end = None
-        self.update()
+        self._clear_selection()
 
     def _paste_from_clipboard(self):
         """统一的粘贴入口：剪贴板有图就落盘并写入路径，否则回退到文本。
