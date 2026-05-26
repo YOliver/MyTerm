@@ -17,6 +17,12 @@ from store.env_check import EnvSpec, _decode_output, check_one, parse_version
     ("10.8.2\n", r"(\d+\.\d+\.\d+)", "10.8.2"),
     # python 风格："Python 3.14.3"
     ("Python 3.14.3", r"Python\s+(\d+\.\d+\.\d+)", "3.14.3"),
+    # pip 风格："pip 26.1.1 from C:\...\site-packages\pip (python 3.14)"——后面的 3.14 不能误当版本
+    (
+        "pip 26.1.1 from C:\\Users\\foo\\AppData\\Local\\Programs\\Python\\Python314\\Lib\\site-packages\\pip (python 3.14)",
+        r"pip\s+(\d+\.\d+\.\d+)",
+        "26.1.1",
+    ),
     # git 风格："git version 2.47.0.windows.1"——只取前三段
     ("git version 2.47.0.windows.1", r"git\s+version\s+(\d+\.\d+\.\d+)", "2.47.0"),
     # claude-internal 风格：版本号嵌在欢迎语前一行（中文冒号 + 后续含其他版本号干扰）

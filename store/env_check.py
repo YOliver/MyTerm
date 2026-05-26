@@ -1,4 +1,4 @@
-"""环境依赖检测：判断 Node.js / npm / Python / Git 等基础工具是否安装。
+"""环境依赖检测：判断 Node.js / npm / Python / pip / Git 等基础工具是否安装。
 
 设计成不依赖 Qt 的纯逻辑模块，UI 层（EnvCheckWorker）通过 check_all 生成器
 拿到结果。版本号正则化提取，避免硬编码不同工具的输出格式。
@@ -46,6 +46,7 @@ ENV_SPECS: list[EnvSpec] = [
     EnvSpec("Node.js",   "node",      ["--version"], r"v?(\d+\.\d+\.\d+)"),
     EnvSpec("npm",       "npm",       ["--version"], r"(\d+\.\d+\.\d+)"),
     EnvSpec("Python",    "python",    ["--version"], r"Python\s+(\d+\.\d+\.\d+)"),
+    EnvSpec("pip",       "pip",       ["--version"], r"pip\s+(\d+\.\d+\.\d+)"),
     EnvSpec("Git",       "git",       ["--version"], r"git\s+version\s+(\d+\.\d+\.\d+)"),
 ]
 
