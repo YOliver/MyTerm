@@ -45,12 +45,19 @@ class ShellPreset:
     - ``command``：由 ``to_argv(host, raw_command)`` 自动算出的 argv，供后端启动直接用。
       这个字段是派生的，不要外部传入；保留它纯粹是为了不破坏 ``main_window.py`` 既有
       ``preset.command`` 调用点。
+    - ``readonly``：True 表示设置面板不允许"删除"该项（label/host/command 仍可改）。
+      内置 powershell / cmd 用这个标记防误删；用户/installer 加的预设默认 False。
+    - ``installer_id``：若非 None，表明这条预设是某个 CLI 安装脚本添加的。
+      用于卸载时精准回收（不会因为用户改了 label/command 就找不到来源）。
+      用户手加的预设此字段为 None。
     """
 
     label: str
     host: str
     raw_command: str
     command: list[str] = field(default_factory=list, compare=False)
+    readonly: bool = False
+    installer_id: Optional[str] = None
 
     def __post_init__(self) -> None:
         # frozen dataclass 不能直接赋值，必须走 object.__setattr__
@@ -60,12 +67,15 @@ class ShellPreset:
 def default_presets() -> list[ShellPreset]:
     """新装/损坏降级时的最小预设。
 
-    只放 powershell + cmd 两条「裸宿主」。AI CLI 都让用户自己加，避免
-    「装了但命令名不一样」时下拉框里全是 ✗。
+    只放 powershell + cmd 两条「裸宿主」，标记 readonly 防误删。AI CLI
+    都让用户自己加（或由"CLI 安装"菜单装完后自动加），避免「装了但
+    命令名不一样」时下拉框里全是 ✗。
     """
     return [
-        ShellPreset(label="powershell", host="none", raw_command="powershell.exe"),
-        ShellPreset(label="cmd",        host="none", raw_command="cmd.exe"),
+        ShellPreset(label="powershell", host="none",
+                    raw_command="powershell.exe", readonly=True),
+        ShellPreset(label="cmd", host="none",
+                    raw_command="cmd.exe", readonly=True),
     ]
 
 
@@ -144,7 +154,12 @@ def load(path: Optional[Path] = None) -> list[ShellPreset]:
 
 
 def _parse_one(item: object, index: int) -> Optional[ShellPreset]:
-    """从一条原始 JSON 记录构造 ``ShellPreset``。任何字段问题都返回 None + stderr 警告。"""
+    """从一条原始 JSON 记录构造 ``ShellPreset``。任何字段问题都返回 None + stderr 警告。
+
+    向后兼容：``readonly`` / ``installer_id`` 是 v1.x 增量字段，旧 json 缺失时
+    走默认值（False / None）；为了让首次升级的用户也能立刻保护到内置项，
+    label 是 "powershell" / "cmd" 且 installer_id=None 时自动补 readonly=True。
+    """
     if not isinstance(item, dict):
         print(f"[shell_presets] 第 {index} 条不是对象，跳过", file=sys.stderr)
         return None
@@ -164,12 +179,47 @@ def _parse_one(item: object, index: int) -> Optional[ShellPreset]:
         print(f"[shell_presets] 第 {index} 条 command 类型错误，跳过", file=sys.stderr)
         return None
 
-    preset = ShellPreset(label=label, host=host, raw_command=command)
+    # 新字段：缺失则默认 False / None；类型错按缺失处理
+    raw_readonly = item.get("readonly", False)
+    readonly = bool(raw_readonly) if isinstance(raw_readonly, bool) else False
+
+    raw_inst = item.get("installer_id", None)
+    installer_id: Optional[str]
+    if raw_inst is None:
+        installer_id = None
+    elif isinstance(raw_inst, str) and raw_inst:
+        installer_id = raw_inst
+    else:
+        installer_id = None
+
+    # 升级兼容：内置 powershell/cmd 自动获得 readonly 保护，无论旧 json 是否带该字段
+    if not readonly and installer_id is None and label in ("powershell", "cmd"):
+        readonly = True
+
+    preset = ShellPreset(
+        label=label, host=host, raw_command=command,
+        readonly=readonly, installer_id=installer_id,
+    )
     if not preset.command:
         # to_argv 兜底返回 [] 表示该条无效（如 host=none 但 command 为空）
         print(f"[shell_presets] 第 {index} 条命令为空，跳过", file=sys.stderr)
         return None
     return preset
+
+
+def _serialize_one(p: ShellPreset) -> dict:
+    """ShellPreset → JSON 可序列化 dict。
+
+    ``readonly`` / ``installer_id`` 仅在非默认值时写入，让 json 在大多数
+    情况下保持简洁，也避免被旧版 MyTerm 读到时出现陌生字段（虽然
+    ``_parse_one`` 已经能容忍未知键，仍以最小变更为优）。
+    """
+    obj: dict = {"label": p.label, "host": p.host, "command": p.raw_command}
+    if p.readonly:
+        obj["readonly"] = True
+    if p.installer_id is not None:
+        obj["installer_id"] = p.installer_id
+    return obj
 
 
 def save(presets: list[ShellPreset], path: Optional[Path] = None) -> None:
@@ -185,10 +235,7 @@ def save(presets: list[ShellPreset], path: Optional[Path] = None) -> None:
 
     payload = {
         "version": SCHEMA_VERSION,
-        "presets": [
-            {"label": p.label, "host": p.host, "command": p.raw_command}
-            for p in presets
-        ],
+        "presets": [_serialize_one(p) for p in presets],
     }
 
     tmp = target.with_suffix(target.suffix + ".tmp")
@@ -204,3 +251,79 @@ def save(presets: list[ShellPreset], path: Optional[Path] = None) -> None:
                 tmp.unlink()
         except OSError:
             pass
+
+
+def add_for_installer(
+    presets: list[ShellPreset],
+    installer_id: str,
+    launch: dict,
+) -> tuple[list[ShellPreset], bool]:
+    """安装成功后把 CLI 启动项追加到预设列表。
+
+    纯函数：不读不写文件，调用方拿到新列表后自行决定是否 ``save()``。
+
+    去重策略：按 ``raw_command`` 比对——用户可能手动加过同名命令，
+    没必要再叠一条。命中已有项时直接返回原列表（``changed=False``），
+    让调用方据此跳过保存。命中但旧条目缺 ``installer_id`` 时，会原地
+    打上当前 installer_id 并标 ``changed=True``，方便后续卸载回收。
+
+    返回 ``(new_presets, changed)``：``new_presets`` 永远是新列表
+    （即使没改动也是浅拷贝），不会就地修改入参。
+    """
+    label = str(launch.get("label", "")).strip()
+    host = str(launch.get("host", "")).strip()
+    raw_command = str(launch.get("raw_command", "")).strip()
+
+    if not label or host not in VALID_HOSTS or not raw_command:
+        # launch 元数据残缺时静默跳过：installer 模块声明问题不应阻塞安装流
+        print(
+            f"[shell_presets] add_for_installer: 启动项元数据不合法 "
+            f"installer_id={installer_id!r} launch={launch!r}，跳过",
+            file=sys.stderr,
+        )
+        return list(presets), False
+
+    new_list: list[ShellPreset] = []
+    changed = False
+    matched = False
+
+    for p in presets:
+        if not matched and p.raw_command == raw_command:
+            matched = True
+            if p.installer_id is None:
+                # 同命令但没归属：补上 installer_id，便于卸载时一并清理
+                new_list.append(ShellPreset(
+                    label=p.label, host=p.host, raw_command=p.raw_command,
+                    readonly=p.readonly, installer_id=installer_id,
+                ))
+                changed = True
+            else:
+                # 已归属（无论是不是当前 installer）：保持原样，避免抢占
+                new_list.append(p)
+        else:
+            new_list.append(p)
+
+    if not matched:
+        new_list.append(ShellPreset(
+            label=label, host=host, raw_command=raw_command,
+            readonly=False, installer_id=installer_id,
+        ))
+        changed = True
+
+    return new_list, changed
+
+
+def remove_for_installer(
+    presets: list[ShellPreset],
+    installer_id: str,
+) -> tuple[list[ShellPreset], bool]:
+    """卸载成功后回收当初由该 installer 添加的预设。
+
+    纯函数。仅匹配 ``installer_id`` 严格相等的条目；用户手加的同命令
+    预设（``installer_id=None``）不动——他们自己加的他们自己负责。
+
+    返回 ``(new_presets, changed)``。同 ``add_for_installer`` 的语义。
+    """
+    new_list = [p for p in presets if p.installer_id != installer_id]
+    changed = len(new_list) != len(presets)
+    return new_list, changed

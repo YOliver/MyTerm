@@ -272,6 +272,10 @@ class MainWindow(QMainWindow):
         settings_menu = menubar.addMenu("设置")
         shell_action = settings_menu.addAction("AI CLI 配置...")
         shell_action.triggered.connect(self._on_open_settings)
+        cli_install_action = settings_menu.addAction("CLI 安装")
+        cli_install_action.triggered.connect(self._on_open_cli_install)
+        skills_action = settings_menu.addAction("skills")
+        skills_action.triggered.connect(self._on_open_skills)
 
         help_menu = menubar.addMenu("帮助")
         usage_action = help_menu.addAction("使用说明")
@@ -292,8 +296,25 @@ class MainWindow(QMainWindow):
         dlg.presets_changed.connect(self._on_presets_changed)
         dlg.exec()
 
-    def _on_presets_changed(self, _new_presets):
+    def _on_open_cli_install(self):
+        # 延迟 import：对话框模块只在用户点开菜单时加载，启动期不付代价
+        from ui.cli_install_dialog import CliInstallDialog
+        dlg = CliInstallDialog(self)
+        # 安装/卸载成功后联动刷新启动下拉框；信号无参，复用 _on_presets_changed
+        # 时套层 lambda，把可选参数留给原签名（ShellPresetsDialog 那边带 list）
+        dlg.presets_changed.connect(lambda: self._on_presets_changed(None))
+        dlg.exec()
+
+    def _on_open_skills(self):
+        # skills 功能尚未实现，先用 QMessageBox 占位告知用户
+        QMessageBox.information(self, "skills", "Skills 功能开发中，敬请期待。")
+
+    def _on_presets_changed(self, _new_presets=None):
         """设置面板保存后：重读盘 + 重填启动下拉框，按 label 回填 currentIndex。
+
+        参数 ``_new_presets`` 在 ShellPresetsDialog 的信号里是新列表；CliInstallDialog
+        触发时为 None。两种调用都直接走 reload，所以参数其实可忽略——保留只是为了
+        signature 兼容旧信号绑定。
 
         已开终端不动：backend 已经在跑，没必要重启。
         """

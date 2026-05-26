@@ -12,8 +12,10 @@ import pytest
 from store.shell_presets import (
     ShellPreset,
     SCHEMA_VERSION,
+    add_for_installer,
     default_presets,
     load,
+    remove_for_installer,
     save,
     to_argv,
 )
@@ -202,3 +204,166 @@ def test_save_is_atomic_no_tmp_left(tmp_path):
     save(default_presets(), path=target)
     leftovers = list(tmp_path.glob("*.tmp"))
     assert leftovers == []
+
+
+# ---------------------- readonly / installer_id 字段 ----------------------
+
+def test_default_presets_marks_builtins_readonly():
+    """内置 powershell / cmd 必须 readonly=True，防误删。"""
+    presets = default_presets()
+    assert all(p.readonly for p in presets)
+    assert all(p.installer_id is None for p in presets)
+
+
+def test_serialize_omits_default_readonly_and_installer_id(tmp_path):
+    """非默认 readonly/installer_id 不写入 json，让普通用户看到的文件最小化。"""
+    target = tmp_path / "shell_presets.json"
+    save([ShellPreset("x", "none", "x.exe")], path=target)
+    data = json.loads(target.read_text(encoding="utf-8"))
+    item = data["presets"][0]
+    assert "readonly" not in item
+    assert "installer_id" not in item
+
+
+def test_serialize_writes_readonly_and_installer_id_when_set(tmp_path):
+    target = tmp_path / "shell_presets.json"
+    save([
+        ShellPreset("ps", "none", "powershell.exe", readonly=True),
+        ShellPreset("claude", "cmd", "claude", installer_id="claude_code"),
+    ], path=target)
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["presets"][0]["readonly"] is True
+    assert data["presets"][1]["installer_id"] == "claude_code"
+
+
+def test_load_legacy_powershell_cmd_promoted_to_readonly(tmp_path):
+    """旧版 json（无 readonly 字段）里的内置项升级时自动获得保护。"""
+    target = tmp_path / "shell_presets.json"
+    target.write_text(json.dumps({
+        "version": 1,
+        "presets": [
+            {"label": "powershell", "host": "none", "command": "powershell.exe"},
+            {"label": "cmd", "host": "none", "command": "cmd.exe"},
+            {"label": "claude", "host": "cmd", "command": "claude"},  # 用户手加的，不动
+        ],
+    }), encoding="utf-8")
+    loaded = load(path=target)
+    by_label = {p.label: p for p in loaded}
+    assert by_label["powershell"].readonly is True
+    assert by_label["cmd"].readonly is True
+    assert by_label["claude"].readonly is False
+    assert by_label["claude"].installer_id is None
+
+
+def test_load_preserves_installer_id(tmp_path):
+    target = tmp_path / "shell_presets.json"
+    target.write_text(json.dumps({
+        "version": 1,
+        "presets": [
+            {"label": "claude", "host": "cmd", "command": "claude",
+             "installer_id": "claude_code"},
+        ],
+    }), encoding="utf-8")
+    loaded = load(path=target)
+    assert loaded[0].installer_id == "claude_code"
+
+
+def test_save_load_roundtrip_with_new_fields(tmp_path):
+    target = tmp_path / "shell_presets.json"
+    original = [
+        ShellPreset("powershell", "none", "powershell.exe", readonly=True),
+        ShellPreset("claude", "cmd", "claude", installer_id="claude_code"),
+        ShellPreset("custom", "powershell", "echo hi"),
+    ]
+    save(original, path=target)
+    loaded = load(path=target)
+    assert len(loaded) == 3
+    for a, b in zip(original, loaded):
+        assert a.readonly == b.readonly
+        assert a.installer_id == b.installer_id
+
+
+# ---------------------- add_for_installer ----------------------
+
+def test_add_for_installer_appends_when_missing():
+    presets = default_presets()
+    new_list, changed = add_for_installer(
+        presets,
+        installer_id="claude_code",
+        launch={"label": "Claude Code", "host": "cmd", "raw_command": "claude"},
+    )
+    assert changed is True
+    assert len(new_list) == 3
+    assert new_list[-1].label == "Claude Code"
+    assert new_list[-1].installer_id == "claude_code"
+    # 不就地修改入参
+    assert len(presets) == 2
+
+
+def test_add_for_installer_dedup_skips_when_command_already_present():
+    """同 raw_command 已存在且已有 installer_id：跳过，changed=False。"""
+    presets = [
+        ShellPreset("powershell", "none", "powershell.exe", readonly=True),
+        ShellPreset("已有 claude", "cmd", "claude", installer_id="claude_code"),
+    ]
+    new_list, changed = add_for_installer(
+        presets, "claude_code",
+        {"label": "Claude Code", "host": "cmd", "raw_command": "claude"},
+    )
+    assert changed is False
+    assert len(new_list) == 2
+
+
+def test_add_for_installer_adopts_user_added_with_same_command():
+    """同 raw_command 已存在但 installer_id=None：补打标记。"""
+    presets = [
+        ShellPreset("我自己加的", "cmd", "claude"),
+    ]
+    new_list, changed = add_for_installer(
+        presets, "claude_code",
+        {"label": "Claude Code", "host": "cmd", "raw_command": "claude"},
+    )
+    assert changed is True
+    assert len(new_list) == 1
+    assert new_list[0].label == "我自己加的"  # 保留用户的标签
+    assert new_list[0].installer_id == "claude_code"
+
+
+def test_add_for_installer_invalid_launch_silent_noop(capsys):
+    presets = default_presets()
+    new_list, changed = add_for_installer(
+        presets, "claude_code", {"label": "", "host": "cmd", "raw_command": ""},
+    )
+    assert changed is False
+    assert new_list == presets
+    assert "启动项元数据不合法" in capsys.readouterr().err
+
+
+# ---------------------- remove_for_installer ----------------------
+
+def test_remove_for_installer_removes_matching():
+    presets = [
+        ShellPreset("powershell", "none", "powershell.exe", readonly=True),
+        ShellPreset("Claude Code", "cmd", "claude", installer_id="claude_code"),
+        ShellPreset("Codebuddy", "cmd", "codebuddy", installer_id="codebuddy"),
+    ]
+    new_list, changed = remove_for_installer(presets, "claude_code")
+    assert changed is True
+    assert [p.label for p in new_list] == ["powershell", "Codebuddy"]
+
+
+def test_remove_for_installer_keeps_user_added_with_same_command():
+    """用户手加的（installer_id=None）即使命令同名也不动。"""
+    presets = [
+        ShellPreset("我自己加的", "cmd", "claude"),
+    ]
+    new_list, changed = remove_for_installer(presets, "claude_code")
+    assert changed is False
+    assert len(new_list) == 1
+
+
+def test_remove_for_installer_noop_when_not_found():
+    presets = default_presets()
+    new_list, changed = remove_for_installer(presets, "claude_code")
+    assert changed is False
+    assert new_list == presets

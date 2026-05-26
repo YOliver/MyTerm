@@ -15,6 +15,7 @@
 import os
 import glob
 import winpty as _winpty_pkg
+from PyInstaller.utils.hooks import collect_submodules
 
 # 单一版本号源，避免 spec 与 main.py 漂移
 _version_globals = {}
@@ -76,6 +77,16 @@ for _pat in ('*.dll', '*.exe'):
         _winpty_binaries.append((_f, 'winpty'))
 
 
+# CLI 安装脚本：每个文件独立模块，发现器靠 pkgutil.iter_modules 扫描包路径。
+# 打包后 PyInstaller 把子模块塞进 base_library.zip，但 iter_modules 需要在
+# 文件系统能看到包目录，所以把 .py 同时作为 datas 复制出来一份，保证
+# 开发态/打包态两条路径行为一致。
+_cli_installer_files = []
+for _f in glob.glob(os.path.join(os.path.dirname(os.path.abspath(SPEC)),
+                                 'scripts', 'cli_installers', '*.py')):
+    _cli_installer_files.append((_f, 'scripts/cli_installers'))
+
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -86,13 +97,13 @@ a = Analysis(
         # store.paths.resource_path("docs/help/...") 读取。
         ('docs/help/usage.md', 'docs/help'),
         ('docs/help/about.md', 'docs/help'),
-    ],
+    ] + _cli_installer_files,
     hiddenimports=[
         'pyte',
         'pyte.screens',
         'wcwidth',
         'winpty',  # pywinpty 实际包名
-    ],
+    ] + collect_submodules('scripts.cli_installers'),
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
