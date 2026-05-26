@@ -205,15 +205,16 @@ def test_discover_invalid_launch_is_ignored(monkeypatch, capsys):
 
 
 # ----------------------------- 新增 CLI installer 覆盖 -----------------------------
-# codex / gemini / qwen_code 与 claude_code 同模板，关键差异是包名/命令名/LAUNCH。
+# codex / gemini / qwen_code / codebuddy 与 claude_code 同模板，关键差异是包名/命令名/LAUNCH。
 # 这些参数化用例只验"模板套对了"，不重复测发现器/run_command 的通用机制。
 
 @pytest.mark.parametrize(
     "module_name,spec_id,display_name,binary,npm_package,launch_label",
     [
-        ("scripts.cli_installers.codex",     "codex",     "Codex CLI",  "codex",  "@openai/codex",            "Codex CLI"),
-        ("scripts.cli_installers.gemini",    "gemini",    "Gemini CLI", "gemini", "@google/gemini-cli",       "Gemini CLI"),
-        ("scripts.cli_installers.qwen_code", "qwen_code", "Qwen Code",  "qwen",   "@qwen-code/qwen-code",     "Qwen Code"),
+        ("scripts.cli_installers.codex",     "codex",     "Codex CLI",       "codex",     "@openai/codex",                 "Codex CLI"),
+        ("scripts.cli_installers.gemini",    "gemini",    "Gemini CLI",      "gemini",    "@google/gemini-cli",            "Gemini CLI"),
+        ("scripts.cli_installers.qwen_code", "qwen_code", "Qwen Code",       "qwen",      "@qwen-code/qwen-code",          "Qwen Code"),
+        ("scripts.cli_installers.codebuddy", "codebuddy", "CodeBuddy Code",  "codebuddy", "@tencent-ai/codebuddy-code",    "CodeBuddy Code"),
     ],
 )
 def test_new_installer_module_constants(module_name, spec_id, display_name, binary, npm_package, launch_label):
@@ -230,9 +231,9 @@ def test_new_installer_module_constants(module_name, spec_id, display_name, bina
     }
 
 
-@pytest.mark.parametrize("spec_id", ["codex", "gemini", "qwen_code"])
+@pytest.mark.parametrize("spec_id", ["codex", "gemini", "qwen_code", "codebuddy"])
 def test_new_installers_discovered_with_launch(spec_id):
-    """发现器把三个新 installer 都列出，LAUNCH 透传到 spec.launch。"""
+    """发现器把四个新 installer 都列出，LAUNCH 透传到 spec.launch。"""
     specs = discover()
     by_id = {s.id: s for s in specs}
     assert spec_id in by_id, f"已发现: {sorted(by_id)}"
@@ -251,6 +252,7 @@ def test_new_installers_discovered_with_launch(spec_id):
         ("scripts.cli_installers.codex",     "codex"),
         ("scripts.cli_installers.gemini",    "gemini"),
         ("scripts.cli_installers.qwen_code", "qwen"),
+        ("scripts.cli_installers.codebuddy", "codebuddy"),
     ],
 )
 def test_new_installer_detect_no_throw_when_missing(monkeypatch, module_name, binary):
@@ -269,6 +271,7 @@ def test_new_installer_detect_no_throw_when_missing(monkeypatch, module_name, bi
         "scripts.cli_installers.codex",
         "scripts.cli_installers.gemini",
         "scripts.cli_installers.qwen_code",
+        "scripts.cli_installers.codebuddy",
     ],
 )
 def test_new_installer_detect_returns_first_line_on_success(monkeypatch, module_name):
@@ -295,6 +298,7 @@ def test_new_installer_detect_returns_first_line_on_success(monkeypatch, module_
         "scripts.cli_installers.codex",
         "scripts.cli_installers.gemini",
         "scripts.cli_installers.qwen_code",
+        "scripts.cli_installers.codebuddy",
     ],
 )
 def test_new_installer_detect_empty_output_treated_as_missing(monkeypatch, module_name):
@@ -321,6 +325,7 @@ def test_new_installer_detect_empty_output_treated_as_missing(monkeypatch, modul
         ("scripts.cli_installers.codex",     "@openai/codex"),
         ("scripts.cli_installers.gemini",    "@google/gemini-cli"),
         ("scripts.cli_installers.qwen_code", "@qwen-code/qwen-code"),
+        ("scripts.cli_installers.codebuddy", "@tencent-ai/codebuddy-code"),
     ],
 )
 def test_new_installer_install_uses_correct_npm_package(monkeypatch, module_name, npm_package):
@@ -347,6 +352,7 @@ def test_new_installer_install_uses_correct_npm_package(monkeypatch, module_name
         ("scripts.cli_installers.codex",     "@openai/codex"),
         ("scripts.cli_installers.gemini",    "@google/gemini-cli"),
         ("scripts.cli_installers.qwen_code", "@qwen-code/qwen-code"),
+        ("scripts.cli_installers.codebuddy", "@tencent-ai/codebuddy-code"),
     ],
 )
 def test_new_installer_uninstall_uses_correct_npm_package(monkeypatch, module_name, npm_package):
