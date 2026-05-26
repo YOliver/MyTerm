@@ -202,3 +202,166 @@ def test_discover_invalid_launch_is_ignored(monkeypatch, capsys):
     spec = next(s for s in specs if s.id == "claude_code")
     assert spec.launch is None
     assert "LAUNCH 格式不合法" in capsys.readouterr().err
+
+
+# ----------------------------- 新增 CLI installer 覆盖 -----------------------------
+# codex / gemini / qwen_code 与 claude_code 同模板，关键差异是包名/命令名/LAUNCH。
+# 这些参数化用例只验"模板套对了"，不重复测发现器/run_command 的通用机制。
+
+@pytest.mark.parametrize(
+    "module_name,spec_id,display_name,binary,npm_package,launch_label",
+    [
+        ("scripts.cli_installers.codex",     "codex",     "Codex CLI",  "codex",  "@openai/codex",            "Codex CLI"),
+        ("scripts.cli_installers.gemini",    "gemini",    "Gemini CLI", "gemini", "@google/gemini-cli",       "Gemini CLI"),
+        ("scripts.cli_installers.qwen_code", "qwen_code", "Qwen Code",  "qwen",   "@qwen-code/qwen-code",     "Qwen Code"),
+    ],
+)
+def test_new_installer_module_constants(module_name, spec_id, display_name, binary, npm_package, launch_label):
+    """模块级常量与 LAUNCH 元数据正确——这些是 UI/store 唯一能看见的契约。"""
+    import importlib
+    mod = importlib.import_module(module_name)
+    assert mod.ID == spec_id
+    assert mod.NAME == display_name
+    assert mod.REQUIRES == ["node", "npm"]
+    assert mod.LAUNCH == {
+        "label": launch_label,
+        "host": "cmd",
+        "raw_command": binary,
+    }
+
+
+@pytest.mark.parametrize("spec_id", ["codex", "gemini", "qwen_code"])
+def test_new_installers_discovered_with_launch(spec_id):
+    """发现器把三个新 installer 都列出，LAUNCH 透传到 spec.launch。"""
+    specs = discover()
+    by_id = {s.id: s for s in specs}
+    assert spec_id in by_id, f"已发现: {sorted(by_id)}"
+    spec = by_id[spec_id]
+    assert isinstance(spec, InstallerSpec)
+    assert spec.uninstall is not None and callable(spec.uninstall)
+    assert spec.launch is not None
+    assert spec.launch["host"] == "cmd"
+    # raw_command 与模块 LAUNCH 一致（具体值另一组 test 已覆盖，这里只验非空）
+    assert spec.launch["raw_command"]
+
+
+@pytest.mark.parametrize(
+    "module_name,binary",
+    [
+        ("scripts.cli_installers.codex",     "codex"),
+        ("scripts.cli_installers.gemini",    "gemini"),
+        ("scripts.cli_installers.qwen_code", "qwen"),
+    ],
+)
+def test_new_installer_detect_no_throw_when_missing(monkeypatch, module_name, binary):
+    """命令不在 PATH：返回 (False, "")，不抛异常。"""
+    import importlib
+    mod = importlib.import_module(module_name)
+    monkeypatch.setattr(f"{module_name}.shutil.which", lambda _: None)
+    installed, detail = mod.detect()
+    assert installed is False
+    assert detail == ""
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "scripts.cli_installers.codex",
+        "scripts.cli_installers.gemini",
+        "scripts.cli_installers.qwen_code",
+    ],
+)
+def test_new_installer_detect_returns_first_line_on_success(monkeypatch, module_name):
+    """正向：subprocess 返回多行版本字符串，detect 取首行展示。"""
+    import importlib
+    mod = importlib.import_module(module_name)
+
+    class _Result:
+        returncode = 0
+        stdout = "1.2.3\n额外说明行\n"
+        stderr = ""
+
+    monkeypatch.setattr(f"{module_name}.shutil.which", lambda _: "/fake/path")
+    monkeypatch.setattr(f"{module_name}.subprocess.run", lambda *a, **kw: _Result())
+
+    installed, detail = mod.detect()
+    assert installed is True
+    assert detail == "1.2.3"
+
+
+@pytest.mark.parametrize(
+    "module_name",
+    [
+        "scripts.cli_installers.codex",
+        "scripts.cli_installers.gemini",
+        "scripts.cli_installers.qwen_code",
+    ],
+)
+def test_new_installer_detect_empty_output_treated_as_missing(monkeypatch, module_name):
+    """退出 0 但输出为空：视为未安装（保守策略）。"""
+    import importlib
+    mod = importlib.import_module(module_name)
+
+    class _Result:
+        returncode = 0
+        stdout = ""
+        stderr = ""
+
+    monkeypatch.setattr(f"{module_name}.shutil.which", lambda _: "/fake/path")
+    monkeypatch.setattr(f"{module_name}.subprocess.run", lambda *a, **kw: _Result())
+
+    installed, detail = mod.detect()
+    assert installed is False
+    assert detail == ""
+
+
+@pytest.mark.parametrize(
+    "module_name,npm_package",
+    [
+        ("scripts.cli_installers.codex",     "@openai/codex"),
+        ("scripts.cli_installers.gemini",    "@google/gemini-cli"),
+        ("scripts.cli_installers.qwen_code", "@qwen-code/qwen-code"),
+    ],
+)
+def test_new_installer_install_uses_correct_npm_package(monkeypatch, module_name, npm_package):
+    """install() 把 npm 包名透传到 run_command；info 事件首发。"""
+    import importlib
+    mod = importlib.import_module(module_name)
+
+    captured: list[list[str]] = []
+
+    def _fake_run_command(cmd, cwd=None):
+        captured.append(list(cmd))
+        yield InstallEvent("exit", "", returncode=0)
+
+    monkeypatch.setattr(f"{module_name}.run_command", _fake_run_command)
+    events = list(mod.install())
+    assert events[0].kind == "info"
+    assert events[-1].kind == "exit" and events[-1].returncode == 0
+    assert captured == [["npm", "i", "-g", npm_package]]
+
+
+@pytest.mark.parametrize(
+    "module_name,npm_package",
+    [
+        ("scripts.cli_installers.codex",     "@openai/codex"),
+        ("scripts.cli_installers.gemini",    "@google/gemini-cli"),
+        ("scripts.cli_installers.qwen_code", "@qwen-code/qwen-code"),
+    ],
+)
+def test_new_installer_uninstall_uses_correct_npm_package(monkeypatch, module_name, npm_package):
+    """uninstall() 跑 npm uninstall -g <package>。"""
+    import importlib
+    mod = importlib.import_module(module_name)
+
+    captured: list[list[str]] = []
+
+    def _fake_run_command(cmd, cwd=None):
+        captured.append(list(cmd))
+        yield InstallEvent("exit", "", returncode=0)
+
+    monkeypatch.setattr(f"{module_name}.run_command", _fake_run_command)
+    events = list(mod.uninstall())
+    assert events[0].kind == "info"
+    assert events[-1].kind == "exit" and events[-1].returncode == 0
+    assert captured == [["npm", "uninstall", "-g", npm_package]]
