@@ -171,9 +171,15 @@ class MainWindow(QMainWindow):
         bl.setSpacing(0)
 
         title = f"{os.path.basename(path)}  {shell_label}"
-        label = QLabel(title)
-        label.setStyleSheet("font-family: Consolas; font-size: 11px; color: #aaa; background: transparent; border: none;")
-        bl.addWidget(label)
+        title_btn = QPushButton(title)
+        title_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        title_btn.setStyleSheet(
+            "QPushButton { font-family: Consolas; font-size: 11px; color: #aaa;"
+            " background: transparent; border: none; }"
+            "QPushButton:hover { color: #ddd; text-decoration: underline; }"
+        )
+        title_btn.clicked.connect(lambda _, p=path: os.startfile(p))
+        bl.addWidget(title_btn)
         bl.addStretch()
 
         close_btn = QPushButton("×")
