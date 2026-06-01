@@ -9,40 +9,46 @@ from PySide6.QtWidgets import (
 
 from store.path_history import PathHistory
 from store.config import AppConfig, compute_grid_shape
+from store.theme import get_theme, save_theme_config, ThemeType
 from backend.terminal_backend import TerminalBackend
 from ui.terminal_widget import TerminalWidget
 from ui.smooth_combo import SmoothComboBox
 
 Slot = namedtuple("Slot", ["backend", "terminal", "tile"])
 
-TILE_BORDER = "1px solid #444"
 
-COMBO_STYLE = (
-    "QComboBox {{"
-    "  font-family: Consolas; font-size: 13px;"
-    "  padding: {};"
-    "  border: 1px solid #555; border-radius: {};"
-    "  background: #1e1e1e; color: #ccc;"
-    "}}"
-    "QComboBox:hover {{ border-color: #777; }}"
-    "QComboBox:focus {{ border-color: #0e639c; }}"
-    "QComboBox QAbstractItemView {{"
-    "  background: #252526; color: #ccc;"
-    "  selection-background-color: #094771; selection-color: #fff;"
-    "  border: 1px solid #555; border-radius: 4px;"
-    "  outline: none;"
-    "}}"
-    "QComboBox QAbstractItemView::item {{"
-    "  padding: {}; border-radius: 3px; min-height: {};"
-    "}}"
-    "QComboBox QAbstractItemView::item:hover {{ background: #2a2d2e; }}"
-    "QComboBox QAbstractItemView::item:selected {{ background: #094771; }}"
-    "QScrollBar:vertical {{ width: 6px; background: #1e1e1e; border-radius: 3px; }}"
-    "QScrollBar::handle:vertical {{"
-    "  background: #555; border-radius: 3px; min-height: 20px; }}"
-    "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}"
-    "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}"
-)
+def _tile_border(theme) -> str:
+    return f"1px solid {theme.ui.border_light}"
+
+
+def _combo_style(theme, pad: str, radius: str, item_pad: str, item_height: str) -> str:
+    u = theme.ui
+    return (
+        f"QComboBox {{"
+        f"  font-family: Consolas; font-size: 13px;"
+        f"  padding: {pad};"
+        f"  border: 1px solid {u.border}; border-radius: {radius};"
+        f"  background: {u.bg_primary}; color: {u.fg_primary};"
+        f"}}"
+        f"QComboBox:hover {{ border-color: {u.button_default_hover}; }}"
+        f"QComboBox:focus {{ border-color: {u.button_primary}; }}"
+        f"QComboBox QAbstractItemView {{"
+        f"  background: {u.bg_secondary}; color: {u.fg_primary};"
+        f"  selection-background-color: {u.selection_bg}; selection-color: {u.selection_fg};"
+        f"  border: 1px solid {u.border}; border-radius: 4px;"
+        f"  outline: none;"
+        f"}}"
+        f"QComboBox QAbstractItemView::item {{"
+        f"  padding: {item_pad}; border-radius: 3px; min-height: {item_height};"
+        f"}}"
+        f"QComboBox QAbstractItemView::item:hover {{ background: {u.list_hover}; }}"
+        f"QComboBox QAbstractItemView::item:selected {{ background: {u.selection_bg}; }}"
+        f"QScrollBar:vertical {{ width: 6px; background: {u.scrollbar_bg}; border-radius: 3px; }}"
+        f"QScrollBar::handle:vertical {{"
+        f"  background: {u.scrollbar_handle}; border-radius: 3px; min-height: 20px; }}"
+        f"QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}"
+        f"QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{ background: none; }}"
+    )
 
 
 class MainWindow(QMainWindow):
@@ -51,6 +57,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("MyTerm")
         self.resize(1100, 650)
 
+        self._theme = get_theme()
+        u = self._theme.ui
+
         self._history = PathHistory()
         self._config = AppConfig()
         self._slots: list[Slot | None] = [None] * self._config.max_terminals
@@ -58,7 +67,7 @@ class MainWindow(QMainWindow):
         self._build_menubar()
 
         central = QWidget()
-        central.setStyleSheet("background: #1e1e1e;")
+        central.setStyleSheet(f"background: {u.bg_primary};")
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -66,7 +75,7 @@ class MainWindow(QMainWindow):
 
         topbar = QWidget()
         topbar.setFixedHeight(56)
-        topbar.setStyleSheet("background: #252526;")
+        topbar.setStyleSheet(f"background: {u.bg_secondary};")
         topbar_layout = QHBoxLayout(topbar)
         topbar_layout.setContentsMargins(8, 8, 8, 8)
         topbar_layout.setSpacing(6)
@@ -75,7 +84,7 @@ class MainWindow(QMainWindow):
         self._path_combo.setMinimumWidth(300)
         self._path_combo.setMinimumHeight(30)
         self._path_combo.setStyleSheet(
-            COMBO_STYLE.format("5px 10px", "4px", "6px 10px", "26px"))
+            _combo_style(self._theme, "5px 10px", "4px", "6px 10px", "26px"))
         self._path_combo.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self._load_history()
         topbar_layout.addWidget(self._path_combo, 1)
@@ -85,7 +94,7 @@ class MainWindow(QMainWindow):
         self._shell_combo.setMinimumWidth(130)
         self._shell_combo.setMinimumHeight(30)
         self._shell_combo.setStyleSheet(
-            COMBO_STYLE.format("5px 8px", "4px", "6px 8px", "24px"))
+            _combo_style(self._theme, "5px 8px", "4px", "6px 8px", "24px"))
         for preset in self._config.shell_presets:
             self._shell_combo.addItem(preset.label)
         topbar_layout.addWidget(self._shell_combo)
@@ -95,8 +104,8 @@ class MainWindow(QMainWindow):
         browse_btn.setFixedHeight(30)
         browse_btn.setStyleSheet(
             "QPushButton { font-size: 13px; padding: 0 16px; "
-            "background: #444; color: #ccc; border: none; border-radius: 3px; }"
-            "QPushButton:hover { background: #555; }"
+            f"background: {u.button_default}; color: {u.fg_primary}; border: none; border-radius: 3px; }}"
+            f"QPushButton:hover {{ background: {u.button_default_hover}; }}"
         )
         browse_btn.clicked.connect(self._on_browse)
         topbar_layout.addWidget(browse_btn)
@@ -106,9 +115,9 @@ class MainWindow(QMainWindow):
         self._launch_btn.setFixedHeight(30)
         self._launch_btn.setStyleSheet(
             "QPushButton { font-size: 13px; padding: 0 20px; "
-            "background: #0e639c; color: white; border: none; border-radius: 3px; }"
-            "QPushButton:hover { background: #1177bb; }"
-            "QPushButton:pressed { background: #094771; }"
+            f"background: {u.button_primary}; color: white; border: none; border-radius: 3px; }}"
+            f"QPushButton:hover {{ background: {u.button_primary_hover}; }}"
+            f"QPushButton:pressed {{ background: {u.button_primary_pressed}; }}"
         )
         self._launch_btn.clicked.connect(self._on_launch)
         topbar_layout.addWidget(self._launch_btn)
@@ -122,7 +131,7 @@ class MainWindow(QMainWindow):
         # 行/列 stretch 由 _relayout 按当前槽位数动态设置
         layout.addWidget(self._grid_widget, 1)
 
-        self.setStyleSheet("QMainWindow { background: #1e1e1e; }")
+        self.setStyleSheet(f"QMainWindow {{ background: {u.bg_primary}; }}")
 
     def _on_launch(self):
         path = self._path_combo.currentText().strip()
@@ -157,15 +166,16 @@ class MainWindow(QMainWindow):
         terminal.setFocus()
 
     def _make_tile(self, path, terminal, slot_idx, shell_label=""):
+        u = self._theme.ui
         tile = QWidget()
-        tile.setStyleSheet(f"background: #1e1e1e; border: {TILE_BORDER};")
+        tile.setStyleSheet(f"background: {u.bg_primary}; border: {_tile_border(self._theme)};")
         tl = QVBoxLayout(tile)
         tl.setContentsMargins(0, 0, 0, 0)
         tl.setSpacing(0)
 
         bar = QWidget()
         bar.setFixedHeight(24)
-        bar.setStyleSheet("background: #2d2d2d; border: none;")
+        bar.setStyleSheet(f"background: {u.bg_tertiary}; border: none;")
         bl = QHBoxLayout(bar)
         bl.setContentsMargins(8, 0, 4, 0)
         bl.setSpacing(0)
@@ -174,9 +184,9 @@ class MainWindow(QMainWindow):
         title_btn = QPushButton(title)
         title_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         title_btn.setStyleSheet(
-            "QPushButton { font-family: Consolas; font-size: 11px; color: #aaa;"
+            f"QPushButton {{ font-family: Consolas; font-size: 11px; color: {u.fg_secondary};"
             " background: transparent; border: none; }"
-            "QPushButton:hover { color: #ddd; text-decoration: underline; }"
+            f"QPushButton:hover {{ color: {u.fg_primary}; text-decoration: underline; }}"
         )
         title_btn.clicked.connect(lambda _, p=path: os.startfile(p))
         bl.addWidget(title_btn)
@@ -185,8 +195,8 @@ class MainWindow(QMainWindow):
         close_btn = QPushButton("×")
         close_btn.setFixedSize(20, 20)
         close_btn.setStyleSheet(
-            "QPushButton { font-size: 13px; color: #999; background: transparent; border: none; border-radius: 2px; }"
-            "QPushButton:hover { background: #c42b1c; color: #fff; }"
+            f"QPushButton {{ font-size: 13px; color: {u.fg_muted}; background: transparent; border: none; border-radius: 2px; }}"
+            f"QPushButton:hover {{ background: {u.button_danger_hover}; color: #fff; }}"
         )
         close_btn.clicked.connect(lambda: self._remove_terminal(slot_idx))
         bl.addWidget(close_btn)
@@ -261,15 +271,16 @@ class MainWindow(QMainWindow):
             self._load_history()
 
     def _build_menubar(self):
-        """主窗口顶部标准 QMenuBar，深色主题与 topbar 对齐。"""
+        """主窗口顶部标准 QMenuBar，主题与 topbar 对齐。"""
+        u = self._theme.ui
         menubar = self.menuBar()
         menubar.setStyleSheet(
-            "QMenuBar { background: #2d2d2d; color: #ccc; }"
+            f"QMenuBar {{ background: {u.bg_tertiary}; color: {u.fg_primary}; }}"
             "QMenuBar::item { padding: 4px 12px; background: transparent; }"
-            "QMenuBar::item:selected { background: #094771; }"
-            "QMenu { background: #252526; color: #ccc; border: 1px solid #555; }"
+            f"QMenuBar::item:selected {{ background: {u.selection_bg}; }}"
+            f"QMenu {{ background: {u.bg_secondary}; color: {u.fg_primary}; border: 1px solid {u.border}; }}"
             "QMenu::item { padding: 6px 24px; }"
-            "QMenu::item:selected { background: #094771; }"
+            f"QMenu::item:selected {{ background: {u.selection_bg}; }}"
         )
         env_menu = menubar.addMenu("环境")
         check_action = env_menu.addAction("检测依赖")
@@ -283,6 +294,13 @@ class MainWindow(QMainWindow):
         skills_action = settings_menu.addAction("skills")
         skills_action.triggered.connect(self._on_open_skills)
 
+        # 主题切换子菜单
+        theme_menu = settings_menu.addMenu("主题")
+        dark_action = theme_menu.addAction("深色")
+        dark_action.triggered.connect(lambda: self._switch_theme(ThemeType.DARK))
+        light_action = theme_menu.addAction("浅色")
+        light_action.triggered.connect(lambda: self._switch_theme(ThemeType.LIGHT))
+
         log_menu = menubar.addMenu("日志")
         open_log_action = log_menu.addAction("打开日志目录")
         open_log_action.triggered.connect(self._on_open_log_dir)
@@ -292,6 +310,24 @@ class MainWindow(QMainWindow):
         usage_action.triggered.connect(self._on_help_usage)
         about_action = help_menu.addAction("软件信息")
         about_action.triggered.connect(self._on_help_about)
+
+        contact_menu = menubar.addMenu("联系我")
+        contact_action = contact_menu.addAction("打开百度")
+        contact_action.triggered.connect(self._on_contact)
+
+    def _switch_theme(self, theme_type: ThemeType) -> None:
+        """保存主题配置，提示用户重启后生效。"""
+        save_theme_config(theme_type)
+        theme_name = "浅色" if theme_type == ThemeType.LIGHT else "深色"
+        QMessageBox.information(
+            self, "主题切换",
+            f"主题已切换为「{theme_name}」。\n重启应用后生效。"
+        )
+
+    def _on_contact(self):
+        """打开浏览器跳转到百度。"""
+        import webbrowser
+        webbrowser.open("https://www.baidu.com")
 
     def _on_check_env(self):
         # 延迟 import：对话框模块只在用户点开菜单时加载，启动期不付代价
