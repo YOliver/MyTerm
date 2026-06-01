@@ -3,6 +3,7 @@ import os
 from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from store.paths import migrate_legacy_files, resource_path
+from store.log import setup_logging
 from ui.main_window import MainWindow
 from version import __version__
 
@@ -14,6 +15,7 @@ def main():
     # 打包模式首次启动把旧位置的 path_history.json 搬到 LOCALAPPDATA。
     # 开发态空操作，无副作用。
     migrate_legacy_files()
+    setup_logging()
 
     app = QApplication(sys.argv)
     app.setApplicationName("MyTerm")

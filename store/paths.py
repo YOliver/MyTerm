@@ -99,6 +99,17 @@ def cache_dir(sub: str = "") -> Path:
     return project_root() / ".cache" / sub if sub else project_root() / ".cache"
 
 
+def log_dir() -> Path:
+    """日志目录。
+
+    打包模式：``%LOCALAPPDATA%/MyTerm/Logs``。
+    开发模式：工程根下 ``logs/``。
+    """
+    if is_frozen():
+        return ensure_dir(local_data_dir() / "Logs")
+    return ensure_dir(project_root() / "logs")
+
+
 def path_history_path() -> Path:
     """``path_history.json`` 全路径。"""
     return local_data_dir() / "path_history.json"

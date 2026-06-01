@@ -283,6 +283,10 @@ class MainWindow(QMainWindow):
         skills_action = settings_menu.addAction("skills")
         skills_action.triggered.connect(self._on_open_skills)
 
+        log_menu = menubar.addMenu("日志")
+        open_log_action = log_menu.addAction("打开日志目录")
+        open_log_action.triggered.connect(self._on_open_log_dir)
+
         help_menu = menubar.addMenu("帮助")
         usage_action = help_menu.addAction("使用说明")
         usage_action.triggered.connect(self._on_help_usage)
@@ -314,6 +318,10 @@ class MainWindow(QMainWindow):
     def _on_open_skills(self):
         # skills 功能尚未实现，先用 QMessageBox 占位告知用户
         QMessageBox.information(self, "skills", "Skills 功能开发中，敬请期待。")
+
+    def _on_open_log_dir(self):
+        from store.paths import log_dir
+        os.startfile(str(log_dir()))
 
     def _on_presets_changed(self, _new_presets=None):
         """设置面板保存后：重读盘 + 重填启动下拉框，按 label 回填 currentIndex。
