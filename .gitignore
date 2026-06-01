@@ -5,6 +5,7 @@ shell_presets.json
 .paste_cache/
 WindTerm-master/
 .claude/
+.codebuddy/
 
 # PyInstaller 产物
 build/
