@@ -165,6 +165,8 @@ class MainWindow(QMainWindow):
         terminal = TerminalWidget(backend)
         backend.start_shell(cwd=path, columns=terminal.columns,
                             rows=terminal.rows, cmdline=cmdline)
+        # 进程退出时自动释放槽位，防止僵尸槽位堆积
+        backend.process_exited.connect(lambda _code, i=idx: self._remove_terminal(i))
 
         shell_label = self._config.shell_presets[self._shell_combo.currentIndex()].label
         tile = self._make_tile(path, terminal, idx, shell_label)

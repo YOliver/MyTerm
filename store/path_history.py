@@ -36,11 +36,17 @@ class PathHistory:
     def _save(self):
         logger.debug("路径历史保存: file=%s 条目=%d paths=%s",
                       self._filepath, len(self._paths), self._paths)
+        tmp_path = self._filepath + ".tmp"
         try:
-            with open(self._filepath, "w", encoding="utf-8") as f:
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(self._paths, f, ensure_ascii=False)
+            os.replace(tmp_path, self._filepath)
         except OSError:
             logger.exception("路径历史保存失败: %s", self._filepath)
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
     def add(self, path):
         path = os.path.normpath(path)
