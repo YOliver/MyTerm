@@ -80,7 +80,7 @@ python main.py
 
 需要装 AI CLI？菜单「设置 → CLI 安装」勾选要装的，等 npm 跑完就行——装完启动下拉里会自动多出一项。
 
-完整功能说明（菜单/快捷键/鼠标/图片粘贴/数据存储位置等）见 [`docs/help/usage.md`](docs/help/usage.md)，也可在应用内「帮助 → 使用说明」查阅。
+完整功能说明（菜单/快捷键/鼠标/图片粘贴/数据存储位置等）见 [`helpdocs/使用手册.md`](helpdocs/使用手册.md)，也可在应用内「帮助 → 使用手册」查阅。
 
 ---
 
@@ -150,7 +150,7 @@ python -m PyInstaller myterm.spec
 只用现成 EXE 重新打安装包：
 
 ```bat
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.1.2 installer\myterm.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.2.0 installer\myterm.iss
 ```
 
 清理后重来：

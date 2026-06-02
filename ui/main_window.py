@@ -323,7 +323,9 @@ class MainWindow(QMainWindow):
         open_log_action.triggered.connect(self._on_open_log_dir)
 
         help_menu = menubar.addMenu("帮助")
-        usage_action = help_menu.addAction("使用说明")
+        welcome_action = help_menu.addAction("欢迎")
+        welcome_action.triggered.connect(self._on_help_welcome)
+        usage_action = help_menu.addAction("使用手册")
         usage_action.triggered.connect(self._on_help_usage)
         about_action = help_menu.addAction("软件信息")
         about_action.triggered.connect(self._on_help_about)
@@ -378,11 +380,14 @@ class MainWindow(QMainWindow):
         self._shell_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._shell_combo.blockSignals(False)
 
+    def _on_help_welcome(self):
+        self._open_help("欢迎", "helpdocs/welcome.md")
+
     def _on_help_usage(self):
-        self._open_help("使用说明", "docs/help/usage.md")
+        self._open_help("使用手册", "helpdocs/使用手册.md")
 
     def _on_help_about(self):
-        self._open_help("软件信息", "docs/help/about.md")
+        self._open_help("软件信息", "helpdocs/about.md")
 
     def _open_help(self, title: str, rel_path: str) -> None:
         """统一帮助对话框入口：延迟 import + 内嵌资源路径解析。"""

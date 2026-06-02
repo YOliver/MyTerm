@@ -45,7 +45,7 @@ def resource_path(name: str) -> Path:
     - 打包模式：从 ``sys._MEIPASS`` 临时解压目录读
     - 开发模式：从工程根读
 
-    ``name`` 用 POSIX 风格相对路径，例如 ``"docs/help/usage.md"``。
+    ``name`` 用 POSIX 风格相对路径，例如 ``"helpdocs/welcome.md"``。
     路径分隔符在 Path 拼接时由系统自适配，不必手动处理。
 
     与 ``local_data_dir`` 的区别：那个管「用户运行时数据」（可读写），

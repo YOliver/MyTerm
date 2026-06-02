@@ -87,8 +87,8 @@ def test_resource_path_frozen_mode(monkeypatch, tmp_path):
 def test_resource_path_supports_subdirs(monkeypatch):
     """子路径（POSIX 风格）能拼出正确的最终路径。"""
     monkeypatch.delattr(sys, "_MEIPASS", raising=False)
-    expected = paths_mod.project_root() / "docs" / "help" / "usage.md"
-    assert paths_mod.resource_path("docs/help/usage.md") == expected
+    expected = paths_mod.project_root() / "helpdocs" / "welcome.md"
+    assert paths_mod.resource_path("helpdocs/welcome.md") == expected
 
 
 # ---- 迁移逻辑 ----
