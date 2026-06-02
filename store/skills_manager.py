@@ -87,14 +87,15 @@ def _parse_skill_md(filepath: Path) -> tuple[str, str]:
         if "description" in frontmatter:
             description = frontmatter["description"]
 
-    # frontmatter 没给 description 时取正文首行非空文本
+    # frontmatter 没给 description 时取正文首行非空文本。
+    # 用 dash_count 计数 --- 分隔符：0=无 frontmatter，1=在 frontmatter 里，>=2=已到正文
     if not description:
-        in_body = False
+        dash_count = 0
         for line in lines:
             if line.strip() == "---":
-                in_body = True
+                dash_count += 1
                 continue
-            if in_body or lines[0].strip() != "---":
+            if dash_count >= 2 or dash_count == 0:
                 stripped = line.strip()
                 if stripped and not stripped.startswith("#"):
                     description = stripped[:120]  # 截断防止过长
