@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import (
     QCheckBox,
     QDialog,
@@ -56,6 +57,11 @@ _DIALOG_STYLE = (
     "  background: #444; color: #ccc; border: none; border-radius: 3px;"
     "}"
     "QPushButton:hover { background: #555; }"
+    "QTextEdit {"
+    "  background: #1e1e1e; color: #ccc;"
+    "  font-family: Consolas; font-size: 13px;"
+    "  border: 1px solid #3a3a3a; border-radius: 4px;"
+    "}"
 )
 
 
@@ -75,13 +81,12 @@ class SkillPreviewDialog(QDialog):
         viewer = QTextEdit(self)
         viewer.setReadOnly(True)
         viewer.setPlainText(content)
-        viewer.setStyleSheet(
-            "QTextEdit {"
-            "  background: #1e1e1e; color: #ccc;"
-            "  font-family: Consolas; font-size: 13px;"
-            "  border: 1px solid #3a3a3a; border-radius: 4px;"
-            "}"
-        )
+        viewer.setAutoFillBackground(True)
+        # 强制深色背景：覆盖 Fusion 样式的浅色默认值
+        p = viewer.palette()
+        p.setColor(QPalette.ColorRole.Base, QColor(30, 30, 30))
+        p.setColor(QPalette.ColorRole.Text, QColor(204, 204, 204))
+        viewer.setPalette(p)
         layout.addWidget(viewer, 1)
 
         btn_row = QHBoxLayout()
@@ -243,6 +248,7 @@ class SkillsDialog(QDialog):
             )
 
             desc_label = QLabel(f"  {skill.description}", row_widget)
+            desc_label.setWordWrap(True)
             desc_label.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
 
             row_layout.addWidget(cb)
