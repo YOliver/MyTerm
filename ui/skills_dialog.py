@@ -141,6 +141,7 @@ class SkillsDialog(QDialog):
         self._scroll = QScrollArea(self)
         self._scroll.setWidgetResizable(True)
         self._skill_container = QWidget()
+        self._skill_container.setStyleSheet("QWidget { background: #1e1e1e; }")
         self._skill_layout = QVBoxLayout(self._skill_container)
         self._skill_layout.setContentsMargins(8, 8, 8, 8)
         self._skill_layout.setSpacing(4)
@@ -232,6 +233,7 @@ class SkillsDialog(QDialog):
 
         for skill in skills:
             row_widget = QWidget()
+            row_widget.setStyleSheet("QWidget { background: #1e1e1e; }")
             row_layout = QVBoxLayout(row_widget)
             row_layout.setContentsMargins(4, 3, 4, 3)
             row_layout.setSpacing(1)
