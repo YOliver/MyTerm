@@ -1,3 +1,7 @@
+import json
+import os
+from unittest.mock import patch
+
 import pytest
 from store.path_history import PathHistory
 
@@ -42,3 +46,48 @@ def test_persist_and_load(tmp_path):
 
     history_b = PathHistory(filepath=str(tmp_path / "paths.json"))
     assert history_b.all() == ["C:\\test"]
+
+
+# ---------------------- 原子写入 ----------------------
+
+def test_save_is_atomic_no_tmp_left(tmp_path):
+    """正常保存后 .tmp 文件不残留。"""
+    fp = str(tmp_path / "paths.json")
+    history = PathHistory(filepath=fp)
+    history.add("C:\\a")
+    leftovers = list(tmp_path.glob("*.tmp"))
+    assert leftovers == []
+
+
+def test_save_atomic_preserves_old_on_replace_failure(tmp_path):
+    """os.replace 失败时，原文件内容不丢失。"""
+    fp = str(tmp_path / "paths.json")
+    history = PathHistory(filepath=fp)
+    history.add("C:\\original")
+    original_content = (tmp_path / "paths.json").read_text(encoding="utf-8")
+
+    with patch("store.path_history.os.replace", side_effect=OSError("模拟失败")):
+        history.add("C:\\new")
+
+    # 原文件内容应保持不变
+    assert (tmp_path / "paths.json").read_text(encoding="utf-8") == original_content
+
+
+def test_save_atomic_cleans_tmp_on_failure(tmp_path):
+    """os.replace 失败后 .tmp 文件应被清理。"""
+    fp = str(tmp_path / "paths.json")
+    history = PathHistory(filepath=fp)
+
+    with patch("store.path_history.os.replace", side_effect=OSError("模拟失败")):
+        history.add("C:\\a")
+
+    leftovers = list(tmp_path.glob("*.tmp"))
+    assert leftovers == []
+
+
+def test_load_survives_truncated_file(tmp_path):
+    """文件被截断（空内容）时，加载返回空列表而非崩溃。"""
+    fp = tmp_path / "paths.json"
+    fp.write_text("", encoding="utf-8")
+    history = PathHistory(filepath=str(fp))
+    assert history.all() == []
