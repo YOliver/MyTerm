@@ -96,8 +96,9 @@ class SkillsDialog(QDialog):
         self._cli_ids = list(CLI_SKILLS_DIRS.keys())
         self._current_cli: str | None = None
         self._skills_cache: dict[str, list[SkillInfo]] = {}
-        # 记录用户最后一次点击的 skill 名（用于预览按钮）
+        # 记录用户最后一次点击的 skill 名 + 按钮（用于高亮 + 预览）
         self._selected_skill_name: str | None = None
+        self._selected_btn: QPushButton | None = None
 
         body = QHBoxLayout(self)
         body.setContentsMargins(12, 12, 12, 12)
@@ -188,6 +189,7 @@ class SkillsDialog(QDialog):
         cli_id = self._cli_ids[row]
         self._current_cli = cli_id
         self._selected_skill_name = None
+        self._selected_btn = None
         skills = self._skills_cache.get(cli_id, [])
         self._rebuild_skill_list(skills)
 
@@ -216,6 +218,20 @@ class SkillsDialog(QDialog):
             self._empty_label.show()
             return
 
+        # skill 名称按钮的两种样式
+        _SKILL_BTN_BASE = (
+            "QPushButton { color: #ccc; font-family: Consolas; font-size: 12px;"
+            " background: transparent; border: none; text-align: left; padding: 4px 8px;"
+            " border-radius: 3px; }"
+            "QPushButton:hover { color: #fff; background: #2a2d2e; }"
+        )
+        _SKILL_BTN_SELECTED = (
+            "QPushButton { color: #fff; font-family: Consolas; font-size: 12px;"
+            " background: #094771; border: none; text-align: left; padding: 4px 8px;"
+            " border-radius: 3px; }"
+            "QPushButton:hover { background: #0e639c; }"
+        )
+
         for skill in skills:
             row_widget = QWidget()
             row_widget.setStyleSheet("QWidget { background: #1e1e1e; }")
@@ -223,16 +239,11 @@ class SkillsDialog(QDialog):
             row_layout.setContentsMargins(4, 3, 4, 3)
             row_layout.setSpacing(1)
 
-            # 可点击的 skill 名称 → 选中后供预览使用
             name_btn = QPushButton(skill.name, row_widget)
             name_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            name_btn.setStyleSheet(
-                "QPushButton { color: #ccc; font-family: Consolas; font-size: 12px;"
-                " background: transparent; border: none; text-align: left; padding: 0px; }"
-                "QPushButton:hover { color: #fff; text-decoration: underline; }"
-            )
+            name_btn.setStyleSheet(_SKILL_BTN_BASE)
             name_btn.clicked.connect(
-                lambda _checked, n=skill.name: setattr(self, "_selected_skill_name", n)
+                lambda _checked, btn=name_btn, n=skill.name: self._select_skill(btn, n)
             )
 
             desc_label = QLabel(f"  {skill.description}", row_widget)
@@ -244,6 +255,26 @@ class SkillsDialog(QDialog):
             self._skill_layout.addWidget(row_widget)
 
         self._skill_layout.addStretch()
+
+    def _select_skill(self, btn: QPushButton, skill_name: str) -> None:
+        """点击 skill 名称：取消旧高亮，高亮新按钮，记录选中 skill。"""
+        # 取消旧按钮高亮
+        if self._selected_btn is not None:
+            self._selected_btn.setStyleSheet(
+                "QPushButton { color: #ccc; font-family: Consolas; font-size: 12px;"
+                " background: transparent; border: none; text-align: left; padding: 4px 8px;"
+                " border-radius: 3px; }"
+                "QPushButton:hover { color: #fff; background: #2a2d2e; }"
+            )
+        # 高亮新按钮
+        btn.setStyleSheet(
+            "QPushButton { color: #fff; font-family: Consolas; font-size: 12px;"
+            " background: #094771; border: none; text-align: left; padding: 4px 8px;"
+            " border-radius: 3px; }"
+            "QPushButton:hover { background: #0e639c; }"
+        )
+        self._selected_btn = btn
+        self._selected_skill_name = skill_name
 
     def _on_open_dir(self) -> None:
         """打开当前选中 CLI 的 skills 目录。"""
