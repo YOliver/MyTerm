@@ -1,3 +1,5 @@
+import logging
+
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
 from PySide6.QtCore import Qt, QTimer, QEvent, QRectF
@@ -8,6 +10,8 @@ import wcwidth
 
 from store.clipboard_image import format_path_for_pty, save_clipboard_image
 from store.paths import cache_dir
+
+logger = logging.getLogger(__name__)
 
 
 # 图片粘贴缓存目录：开发态 .paste_cache/，打包态 %LOCALAPPDATA%/MyTerm/Cache/paste/
@@ -168,6 +172,8 @@ class TerminalWidget(QWidget):
         self.update()
 
     def _on_exit(self, exit_code):
+        logger.info("TerminalWidget 收到进程退出信号: exit_code=%d, widget=%s",
+                     exit_code, id(self))
         msg = f"\r\n\n[Process exited with code {exit_code}]\r\n"
         self._stream.feed(msg)
         self.update()

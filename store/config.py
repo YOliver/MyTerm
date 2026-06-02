@@ -8,6 +8,10 @@ Shell / CLI 预设原本硬编码在这里，已迁移到 ``store/shell_presets.
 """
 from __future__ import annotations
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # 3×3 网格在默认窗口尺寸 (1100×650) 下每槽位约 360×210，
 # 已是终端可读的下限。再大的网格槽位会拥挤到不可用，故强制 clamp。
@@ -54,6 +58,8 @@ class AppConfig:
         from store import shell_presets
         self._shell_presets_module = shell_presets
         self._shell_presets = shell_presets.load()
+        logger.info("配置加载完成: max_terminals=%d, presets=%d",
+                     self._max_terminals, len(self._shell_presets))
 
     @property
     def max_terminals(self) -> int:
@@ -67,3 +73,4 @@ class AppConfig:
     def reload_shell_presets(self) -> None:
         """重新读盘刷新预设。设置面板保存后由信号触发。"""
         self._shell_presets = self._shell_presets_module.load()
+        logger.info("预设重载完成, 共 %d 条", len(self._shell_presets))

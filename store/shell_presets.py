@@ -22,13 +22,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import shlex
-import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 1
 
@@ -96,7 +97,7 @@ def to_argv(host: str, command: str) -> list[str]:
         return ["cmd.exe", "/K", cmd]
 
     if host != "none":
-        print(f"[shell_presets] 未知 host {host!r}，按 'none' 处理", file=sys.stderr)
+        logger.warning("未知 host %r，按 'none' 处理", host)
 
     if not cmd:
         # host=none 必须有可执行命令；空串无意义
@@ -129,12 +130,11 @@ def load(path: Optional[Path] = None) -> list[ShellPreset]:
         with open(target, "r", encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as e:
-        print(f"[shell_presets] 解析失败 {target}: {e}；使用默认预设（坏文件保留不覆盖）",
-              file=sys.stderr)
+        logger.warning("解析失败 %s: %s；使用默认预设（坏文件保留不覆盖）", target, e)
         return default_presets()
 
     if not isinstance(data, dict) or "presets" not in data:
-        print(f"[shell_presets] 顶层结构不合法 {target}；使用默认预设", file=sys.stderr)
+        logger.warning("顶层结构不合法 %s；使用默认预设", target)
         return default_presets()
 
     raw_list = data.get("presets")
@@ -150,6 +150,7 @@ def load(path: Optional[Path] = None) -> list[ShellPreset]:
     if not presets:
         # 全部条目非法 → 兜底默认
         return default_presets()
+    logger.debug("预设加载成功: %s, 共 %d 条", target, len(presets))
     return presets
 
 
@@ -161,7 +162,7 @@ def _parse_one(item: object, index: int) -> Optional[ShellPreset]:
     label 是 "powershell" / "cmd" 且 installer_id=None 时自动补 readonly=True。
     """
     if not isinstance(item, dict):
-        print(f"[shell_presets] 第 {index} 条不是对象，跳过", file=sys.stderr)
+        logger.warning("第 %d 条不是对象，跳过", index)
         return None
 
     label = item.get("label")
@@ -169,14 +170,13 @@ def _parse_one(item: object, index: int) -> Optional[ShellPreset]:
     command = item.get("command")
 
     if not isinstance(label, str) or not label.strip():
-        print(f"[shell_presets] 第 {index} 条 label 缺失或空，跳过", file=sys.stderr)
+        logger.warning("第 %d 条 label 缺失或空，跳过", index)
         return None
     if host not in VALID_HOSTS:
-        print(f"[shell_presets] 第 {index} 条 host={host!r} 非法，跳过 "
-              f"(合法值 {VALID_HOSTS})", file=sys.stderr)
+        logger.warning("第 %d 条 host=%r 非法，跳过 (合法值 %s)", index, host, VALID_HOSTS)
         return None
     if not isinstance(command, str):
-        print(f"[shell_presets] 第 {index} 条 command 类型错误，跳过", file=sys.stderr)
+        logger.warning("第 %d 条 command 类型错误，跳过", index)
         return None
 
     # 新字段：缺失则默认 False / None；类型错按缺失处理
@@ -202,7 +202,7 @@ def _parse_one(item: object, index: int) -> Optional[ShellPreset]:
     )
     if not preset.command:
         # to_argv 兜底返回 [] 表示该条无效（如 host=none 但 command 为空）
-        print(f"[shell_presets] 第 {index} 条命令为空，跳过", file=sys.stderr)
+        logger.warning("第 %d 条命令为空，跳过", index)
         return None
     return preset
 
@@ -230,7 +230,7 @@ def save(presets: list[ShellPreset], path: Optional[Path] = None) -> None:
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
-        print(f"[shell_presets] 创建目录失败 {target.parent}: {e}", file=sys.stderr)
+        logger.warning("创建目录失败 %s: %s", target.parent, e)
         return
 
     payload = {
@@ -244,7 +244,7 @@ def save(presets: list[ShellPreset], path: Optional[Path] = None) -> None:
             json.dump(payload, f, ensure_ascii=False, indent=2)
         os.replace(tmp, target)
     except OSError as e:
-        print(f"[shell_presets] 写入失败 {target}: {e}", file=sys.stderr)
+        logger.warning("写入失败 %s: %s", target, e)
         # 清理可能残留的 .tmp
         try:
             if tmp.exists():
@@ -276,10 +276,9 @@ def add_for_installer(
 
     if not label or host not in VALID_HOSTS or not raw_command:
         # launch 元数据残缺时静默跳过：installer 模块声明问题不应阻塞安装流
-        print(
-            f"[shell_presets] add_for_installer: 启动项元数据不合法 "
-            f"installer_id={installer_id!r} launch={launch!r}，跳过",
-            file=sys.stderr,
+        logger.warning(
+            "add_for_installer: 启动项元数据不合法 "
+            "installer_id=%r launch=%r，跳过", installer_id, launch,
         )
         return list(presets), False
 

@@ -1,3 +1,4 @@
+import logging
 import os
 from collections import namedtuple
 
@@ -14,6 +15,8 @@ from ui.terminal_widget import TerminalWidget
 from ui.smooth_combo import SmoothComboBox
 
 Slot = namedtuple("Slot", ["backend", "terminal", "tile"])
+
+logger = logging.getLogger(__name__)
 
 TILE_BORDER = "1px solid #444"
 
@@ -50,6 +53,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("MyTerm")
         self.resize(1100, 650)
+        logger.info("主窗口初始化")
 
         self._history = PathHistory()
         self._config = AppConfig()
@@ -130,20 +134,33 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "提示", "请先选择一个路径")
             return
         if not os.path.isdir(path):
+            logger.warning("启动路径不存在: %s", path)
             QMessageBox.warning(self, "错误", f"路径不存在:\n{path}")
             return
 
+        combo_idx = self._shell_combo.currentIndex()
+        presets = self._config.shell_presets
+        logger.info("用户启动终端: path=%s combo_idx=%d presets_len=%d", path, combo_idx, len(presets))
+        if combo_idx < 0 or combo_idx >= len(presets):
+            logger.error("shell_combo 索引越界: idx=%d, presets=%d", combo_idx, len(presets))
+            QMessageBox.warning(self, "错误", "Shell 预设索引异常，请重新选择")
+            return
+        preset = presets[combo_idx]
+        logger.info("选中预设: label=%s host=%s cmd=%s", preset.label, preset.host, preset.raw_command)
         self._history.add(path)
         self._load_history()
-        cmdline = list(self._config.shell_presets[self._shell_combo.currentIndex()].command)
+        cmdline = list(preset.command)
         self._add_terminal(path, cmdline)
 
     def _add_terminal(self, path, cmdline=None):
         idx = self._find_empty_slot()
         if idx is None:
+            logger.warning("终端槽位已满 (max=%d)", self._config.max_terminals)
             QMessageBox.warning(self, "提示", f"已达到最大数量 {self._config.max_terminals}")
             return
 
+        logger.info("创建终端会话: slot=%d path=%s cmd=%s (已用=%d/%d)",
+                     idx, path, cmdline, self._active_count(), self._config.max_terminals)
         backend = TerminalBackend()
         terminal = TerminalWidget(backend)
         backend.start_shell(cwd=path, columns=terminal.columns,
@@ -152,6 +169,8 @@ class MainWindow(QMainWindow):
         shell_label = self._config.shell_presets[self._shell_combo.currentIndex()].label
         tile = self._make_tile(path, terminal, idx, shell_label)
         self._slots[idx] = Slot(backend, terminal, tile)
+        logger.debug("终端已加入 slot=%d, 槽位=%s",
+                      idx, ["空" if s is None else "占" for s in self._slots])
 
         self._relayout()
         terminal.setFocus()
@@ -198,17 +217,27 @@ class MainWindow(QMainWindow):
     def _remove_terminal(self, slot_idx):
         slot = self._slots[slot_idx]
         if slot is None:
+            logger.warning("_remove_terminal: slot=%d 已经为空，跳过", slot_idx)
             return
+        is_alive = slot.backend.isRunning()
+        logger.info("关闭终端会话: slot=%d, backend_alive=%s, 槽位=%s",
+                     slot_idx, is_alive,
+                     ["空" if s is None else "占" for s in self._slots])
         slot.backend.stop()
         self._grid.removeWidget(slot.tile)
         slot.tile.deleteLater()
         self._slots[slot_idx] = None
+        logger.debug("终端已移除 slot=%d, 槽位=%s",
+                      slot_idx, ["空" if s is None else "占" for s in self._slots])
         self._relayout()
 
     def _find_empty_slot(self):
+        snapshot = ["空" if s is None else "占" for s in self._slots]
         for i, s in enumerate(self._slots):
             if s is None:
+                logger.debug("_find_empty_slot: 槽位=%s → 返回 %d", snapshot, i)
                 return i
+        logger.warning("_find_empty_slot: 无空槽位, 槽位=%s", snapshot)
         return None
 
     def _active_count(self):
@@ -221,14 +250,17 @@ class MainWindow(QMainWindow):
             if item and item.widget():
                 self._grid.removeWidget(item.widget())
 
-        # 2) 收集非空 tile
+        # 2) 收集非空 tile（保留 slot 索引用于日志）
         tiles = [s for s in self._slots if s is not None]
+        tile_indices = [i for i, s in enumerate(self._slots) if s is not None]
         count = len(tiles)
         if count == 0:
+            logger.debug("_relayout: 无终端, 跳过")
             return
 
         # 3) 按通用算法计算最接近正方形的网格
         rows, cols = compute_grid_shape(count)
+        logger.debug("_relayout: tile_slots=%s, grid=%dx%d", tile_indices, rows, cols)
 
         # 4) 清掉所有旧 stretch（防止上次更大网格残留 stretch=1 的空行/空列）
         for r in range(self._grid.rowCount()):
@@ -248,6 +280,7 @@ class MainWindow(QMainWindow):
 
     def _load_history(self):
         paths = self._history.all()
+        logger.debug("_load_history: 加载 %d 条路径记录", len(paths))
         self._path_combo.clear()
         self._path_combo.addItems(paths)
         if paths:
@@ -333,6 +366,7 @@ class MainWindow(QMainWindow):
         已开终端不动：backend 已经在跑，没必要重启。
         """
         self._config.reload_shell_presets()
+        logger.info("Shell 预设已刷新, 共 %d 条", len(self._config.shell_presets))
         old_label = self._shell_combo.currentText()
         self._shell_combo.blockSignals(True)
         self._shell_combo.clear()

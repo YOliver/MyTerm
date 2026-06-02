@@ -8,9 +8,12 @@
 """
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from PySide6.QtGui import QImage
@@ -34,7 +37,8 @@ def save_clipboard_image(
 
     try:
         os.makedirs(cache_dir, exist_ok=True)
-    except OSError:
+    except OSError as e:
+        logger.warning("创建图片缓存目录失败 %s: %s", cache_dir, e)
         return None
 
     if now is None:
@@ -45,6 +49,7 @@ def save_clipboard_image(
     abs_path = os.path.abspath(os.path.join(cache_dir, filename))
 
     if not image.save(abs_path, "PNG"):
+        logger.warning("图片保存失败: %s", abs_path)
         return None
     return abs_path
 

@@ -54,11 +54,10 @@ def test_to_argv_none_quoted_path_with_spaces():
     assert argv[1] == "--login"
 
 
-def test_to_argv_unknown_host_falls_back_to_none(capsys):
+def test_to_argv_unknown_host_falls_back_to_none(caplog):
     argv = to_argv("zsh", "echo hi")
     assert argv == ["echo", "hi"]
-    captured = capsys.readouterr()
-    assert "未知 host" in captured.err
+    assert "未知 host" in caplog.text
 
 
 def test_to_argv_none_empty_returns_empty_list():
@@ -104,7 +103,7 @@ def test_load_returns_default_when_missing(tmp_path):
     assert target.exists()
 
 
-def test_load_returns_default_when_corrupt(tmp_path, capsys):
+def test_load_returns_default_when_corrupt(tmp_path, caplog):
     target = tmp_path / "shell_presets.json"
     target.write_bytes(b"{not valid json")
     original = target.read_bytes()
@@ -113,7 +112,7 @@ def test_load_returns_default_when_corrupt(tmp_path, capsys):
     assert [p.label for p in presets] == ["powershell", "cmd"]
     # 关键：坏文件不被覆盖（保护用户手改时的失误）
     assert target.read_bytes() == original
-    assert "解析失败" in capsys.readouterr().err
+    assert "解析失败" in caplog.text
 
 
 def test_load_returns_default_when_top_level_not_dict(tmp_path):
@@ -123,7 +122,7 @@ def test_load_returns_default_when_top_level_not_dict(tmp_path):
     assert [p.label for p in presets] == ["powershell", "cmd"]
 
 
-def test_load_skips_invalid_entry(tmp_path, capsys):
+def test_load_skips_invalid_entry(tmp_path, caplog):
     target = tmp_path / "shell_presets.json"
     target.write_text(json.dumps({
         "version": 1,
@@ -139,11 +138,11 @@ def test_load_skips_invalid_entry(tmp_path, capsys):
 
     presets = load(path=target)
     assert [p.label for p in presets] == ["good"]
-    err = capsys.readouterr().err
-    assert "label 缺失或空" in err
-    assert "host=" in err
-    assert "command 类型错误" in err
-    assert "命令为空" in err
+    log_text = caplog.text
+    assert "label 缺失或空" in log_text
+    assert "host=" in log_text
+    assert "command 类型错误" in log_text
+    assert "命令为空" in log_text
 
 
 def test_load_returns_default_when_all_invalid(tmp_path):
@@ -329,14 +328,14 @@ def test_add_for_installer_adopts_user_added_with_same_command():
     assert new_list[0].installer_id == "claude_code"
 
 
-def test_add_for_installer_invalid_launch_silent_noop(capsys):
+def test_add_for_installer_invalid_launch_silent_noop(caplog):
     presets = default_presets()
     new_list, changed = add_for_installer(
         presets, "claude_code", {"label": "", "host": "cmd", "raw_command": ""},
     )
     assert changed is False
     assert new_list == presets
-    assert "启动项元数据不合法" in capsys.readouterr().err
+    assert "启动项元数据不合法" in caplog.text
 
 
 # ---------------------- remove_for_installer ----------------------

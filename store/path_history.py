@@ -1,5 +1,8 @@
 import json
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 
 class PathHistory:
@@ -13,22 +16,42 @@ class PathHistory:
 
     def _load(self):
         try:
+            file_size = os.path.getsize(self._filepath)
+        except OSError:
+            file_size = -1
+        try:
             with open(self._filepath, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (FileNotFoundError, json.JSONDecodeError):
+                data = json.load(f)
+            logger.debug("路径历史加载: file=%s size=%d 条目=%d",
+                          self._filepath, file_size, len(data))
+            return data
+        except FileNotFoundError:
+            logger.debug("路径历史文件不存在: %s", self._filepath)
+            return []
+        except json.JSONDecodeError as e:
+            logger.warning("路径历史文件损坏: file=%s size=%d err=%s",
+                            self._filepath, file_size, e)
             return []
 
     def _save(self):
-        with open(self._filepath, "w", encoding="utf-8") as f:
-            json.dump(self._paths, f, ensure_ascii=False)
+        logger.debug("路径历史保存: file=%s 条目=%d paths=%s",
+                      self._filepath, len(self._paths), self._paths)
+        try:
+            with open(self._filepath, "w", encoding="utf-8") as f:
+                json.dump(self._paths, f, ensure_ascii=False)
+        except OSError:
+            logger.exception("路径历史保存失败: %s", self._filepath)
 
     def add(self, path):
         path = os.path.normpath(path)
-        if path in self._paths:
+        existed = path in self._paths
+        if existed:
             self._paths.remove(path)
         self._paths.insert(0, path)
         if len(self._paths) > 10:
             self._paths = self._paths[:10]
+        logger.debug("路径历史 add: path=%s existed=%s 结果=%d 条",
+                      path, existed, len(self._paths))
         self._save()
 
     def all(self):
