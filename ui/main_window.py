@@ -315,8 +315,10 @@ class MainWindow(QMainWindow):
         shell_action.triggered.connect(self._on_open_settings)
         cli_install_action = settings_menu.addAction("CLI 安装")
         cli_install_action.triggered.connect(self._on_open_cli_install)
-        skills_action = settings_menu.addAction("skills")
-        skills_action.triggered.connect(self._on_open_skills)
+
+        skills_menu = menubar.addMenu("Skills")
+        manage_action = skills_menu.addAction("管理 Skills")
+        manage_action.triggered.connect(self._on_open_skills_dialog)
 
         log_menu = menubar.addMenu("日志")
         open_log_action = log_menu.addAction("打开日志目录")
@@ -352,9 +354,11 @@ class MainWindow(QMainWindow):
         dlg.presets_changed.connect(lambda: self._on_presets_changed(None))
         dlg.exec()
 
-    def _on_open_skills(self):
-        # skills 功能尚未实现，先用 QMessageBox 占位告知用户
-        QMessageBox.information(self, "skills", "Skills 功能开发中，敬请期待。")
+    def _on_open_skills_dialog(self):
+        # 延迟 import：对话框模块只在用户点开菜单时加载，启动期不付代价
+        from ui.skills_dialog import SkillsDialog
+        dlg = SkillsDialog(self)
+        dlg.exec()
 
     def _on_open_log_dir(self):
         from store.paths import log_dir
