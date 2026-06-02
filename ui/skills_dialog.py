@@ -1,4 +1,4 @@
-"""Skills 管理对话框：按 CLI 分组浏览、启用/禁用、预览 SKILL.md。"""
+"""Skills 浏览对话框：按 CLI 分组展示全局 skills，支持预览 SKILL.md。"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -6,7 +6,6 @@ from pathlib import Path
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPalette, QColor
 from PySide6.QtWidgets import (
-    QCheckBox,
     QDialog,
     QHBoxLayout,
     QLabel,
@@ -17,7 +16,6 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QVBoxLayout,
     QWidget,
-    QMessageBox,
 )
 
 from store.skills_manager import (
@@ -27,7 +25,6 @@ from store.skills_manager import (
     load_skill_content,
     open_skills_dir,
     scan_skills,
-    set_skill_enabled,
 )
 
 _DIALOG_STYLE = (
@@ -41,16 +38,6 @@ _DIALOG_STYLE = (
     "QListWidget::item:selected { background: #094771; color: #fff; }"
     "QListWidget::item:hover { background: #2a2d2e; }"
     "QScrollArea { background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 4px; }"
-    "QCheckBox {"
-    "  color: #ccc; font-family: Consolas; font-size: 12px; spacing: 8px;"
-    "}"
-    "QCheckBox::indicator { width: 16px; height: 16px; }"
-    "QCheckBox::indicator:unchecked {"
-    "  background: #3a3a3a; border: 1px solid #555; border-radius: 3px;"
-    "}"
-    "QCheckBox::indicator:checked {"
-    "  background: #0e639c; border: 1px solid #1177bb; border-radius: 3px;"
-    "}"
     "QLabel { color: #aaa; font-family: Consolas; font-size: 11px; }"
     "QPushButton {"
     "  font-size: 12px; padding: 6px 16px;"
@@ -98,19 +85,18 @@ class SkillPreviewDialog(QDialog):
 
 
 class SkillsDialog(QDialog):
-    """Skills 管理主对话框：左侧 CLI 列表，右侧 skill 清单 + 操作按钮。"""
+    """Skills 浏览对话框：左侧 CLI 列表，右侧 skill 清单 + 预览按钮。"""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Skills 管理")
+        self.setWindowTitle("Skills 浏览")
         self.resize(800, 520)
         self.setStyleSheet(_DIALOG_STYLE)
 
         self._cli_ids = list(CLI_SKILLS_DIRS.keys())
         self._current_cli: str | None = None
-        # 缓存每个 CLI 的 skills 列表，checkbox 状态变更后同步更新
         self._skills_cache: dict[str, list[SkillInfo]] = {}
-        # 记录用户最后一次点击的 skill 名（用于预览按钮，只存名称避免 stale reference）
+        # 记录用户最后一次点击的 skill 名（用于预览按钮）
         self._selected_skill_name: str | None = None
 
         body = QHBoxLayout(self)
@@ -180,14 +166,13 @@ class SkillsDialog(QDialog):
         self._populate_cli_list()
 
     def _populate_cli_list(self) -> None:
-        """扫描所有 CLI 并填充左侧列表。"""
+        """扫描所有 CLI 并填充左侧列表（仅统计启用的 skills）。"""
         self._cli_list.clear()
         for cli_id in self._cli_ids:
-            skills = scan_skills(cli_id)
+            skills = [s for s in scan_skills(cli_id) if s.enabled]
             self._skills_cache[cli_id] = skills
             display = CLI_DISPLAY_NAMES.get(cli_id, cli_id)
             count = len(skills)
-            # 数量 0 的灰色显示
             text = f"{display}  ({count})"
             item = QListWidgetItem(text)
             if count == 0:
@@ -202,12 +187,12 @@ class SkillsDialog(QDialog):
             return
         cli_id = self._cli_ids[row]
         self._current_cli = cli_id
-        self._selected_skill_name = None  # 切换 CLI 时清空选中
+        self._selected_skill_name = None
         skills = self._skills_cache.get(cli_id, [])
         self._rebuild_skill_list(skills)
 
     def _rebuild_skill_list(self, skills: list[SkillInfo]) -> None:
-        """重新构建右侧 skill checkbox 列表。"""
+        """重新构建右侧 skill 列表。"""
         # 清空旧 widgets
         while self._skill_layout.count() > 0:
             item = self._skill_layout.takeAt(0)
@@ -238,14 +223,15 @@ class SkillsDialog(QDialog):
             row_layout.setContentsMargins(4, 3, 4, 3)
             row_layout.setSpacing(1)
 
-            cb = QCheckBox(skill.name, row_widget)
-            cb.setChecked(skill.enabled)
-            # 回调时用默认参数捕获当前值，避免闭包延迟绑定
-            cb.toggled.connect(
-                lambda checked, s=skill: self._on_toggle(s, checked)
+            # 可点击的 skill 名称 → 选中后供预览使用
+            name_btn = QPushButton(skill.name, row_widget)
+            name_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            name_btn.setStyleSheet(
+                "QPushButton { color: #ccc; font-family: Consolas; font-size: 12px;"
+                " background: transparent; border: none; text-align: left; padding: 0px; }"
+                "QPushButton:hover { color: #fff; text-decoration: underline; }"
             )
-            # 记录最后一次点击的 skill 名（用于预览按钮），只存名称避免 stale reference
-            cb.clicked.connect(
+            name_btn.clicked.connect(
                 lambda _checked, n=skill.name: setattr(self, "_selected_skill_name", n)
             )
 
@@ -253,54 +239,11 @@ class SkillsDialog(QDialog):
             desc_label.setWordWrap(True)
             desc_label.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
 
-            row_layout.addWidget(cb)
+            row_layout.addWidget(name_btn)
             row_layout.addWidget(desc_label)
             self._skill_layout.addWidget(row_widget)
 
         self._skill_layout.addStretch()
-
-    def _on_toggle(self, skill: SkillInfo, checked: bool) -> None:
-        """checkbox 切换时移动目录。"""
-        cli_id = skill.cli_id
-        ok = set_skill_enabled(cli_id, skill.name, checked)
-        if not ok:
-            display = CLI_DISPLAY_NAMES.get(cli_id, cli_id)
-            action = "启用" if checked else "禁用"
-            QMessageBox.warning(
-                self, "操作失败",
-                f"{action} skill \"{skill.name}\" 失败。\n\n"
-                f"请检查 {display} 的 skills 目录权限。",
-            )
-            # 刷新回真实状态
-            self._refresh_current()
-            return
-        # 更新缓存
-        self._skills_cache[cli_id] = scan_skills(cli_id)
-        # 更新左侧计数
-        self._update_cli_count(cli_id)
-
-    def _refresh_current(self) -> None:
-        """重新扫描当前 CLI 并刷新右侧列表。"""
-        if self._current_cli is None:
-            return
-        skills = scan_skills(self._current_cli)
-        self._skills_cache[self._current_cli] = skills
-        self._rebuild_skill_list(skills)
-
-    def _update_cli_count(self, cli_id: str) -> None:
-        """更新左侧列表中某个 CLI 的技能计数。"""
-        try:
-            idx = self._cli_ids.index(cli_id)
-        except ValueError:
-            return
-        skills = self._skills_cache.get(cli_id, [])
-        display = CLI_DISPLAY_NAMES.get(cli_id, cli_id)
-        text = f"{display}  ({len(skills)})"
-        item = self._cli_list.item(idx)
-        if item:
-            item.setText(text)
-            if len(skills) == 0:
-                item.setForeground(Qt.GlobalColor.gray)
 
     def _on_open_dir(self) -> None:
         """打开当前选中 CLI 的 skills 目录。"""
@@ -311,9 +254,8 @@ class SkillsDialog(QDialog):
     def _on_preview(self) -> None:
         """预览当前选中 skill 的 SKILL.md 全文。
 
-        优先取用户最后一次点击 checkbox 的 skill 名（``_selected_skill_name``），
-        fallback 到列表第一个。从缓存中获取最新的 enabled 状态，而非闭包中
-        可能过期的 SkillInfo 引用。
+        优先取用户最后一次点击的 skill 名（``_selected_skill_name``），
+        fallback 到列表第一个。
         """
         if self._current_cli is None:
             return
