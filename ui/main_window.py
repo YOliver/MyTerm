@@ -5,13 +5,17 @@ from collections import namedtuple
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QPushButton, QMessageBox, QFileDialog, QLabel, QSizePolicy,
+    QPushButton, QMessageBox, QFileDialog, QLabel, QSizePolicy, QScrollBar,
 )
 
 from store.path_history import PathHistory
 from store.config import AppConfig, compute_grid_shape
 from backend.terminal_backend import TerminalBackend
-from ui.terminal_widget import TerminalWidget
+from ui.terminal_widget import (
+    TerminalWidget,
+    scroll_offset_to_slider_value,
+    slider_value_to_scroll_offset,
+)
 from ui.smooth_combo import SmoothComboBox
 
 Slot = namedtuple("Slot", ["backend", "terminal", "tile"])
@@ -19,6 +23,25 @@ Slot = namedtuple("Slot", ["backend", "terminal", "tile"])
 logger = logging.getLogger(__name__)
 
 TILE_BORDER = "1px solid #444"
+
+# 终端右侧滚动条样式：暗色窄滚动条，与 COMBO_STYLE 里的下拉滚动条视觉一致。
+# 注意：单独的 QScrollBar 部件（不是嵌在 view 里）样式表必须用顶级选择器，
+# 不能用 QComboBox QScrollBar 那种后代选择器。
+TERMINAL_SCROLLBAR_STYLE = (
+    "QScrollBar:vertical {"
+    "  width: 10px; background: #1e1e1e; border: none; margin: 0;"
+    "}"
+    "QScrollBar::handle:vertical {"
+    "  background: #555; border-radius: 5px; min-height: 24px;"
+    "}"
+    "QScrollBar::handle:vertical:hover { background: #777; }"
+    "QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {"
+    "  height: 0; background: none;"
+    "}"
+    "QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {"
+    "  background: none;"
+    "}"
+)
 
 COMBO_STYLE = (
     "QComboBox {{"
@@ -224,8 +247,49 @@ class MainWindow(QMainWindow):
         close_btn.clicked.connect(lambda: self._remove_terminal(slot_idx))
         bl.addWidget(close_btn)
 
+        # 终端 + 右侧滚动条：水平并排。滚动条占用一点宽度，terminal 自适应剩余宽度，
+        # 触发 _apply_resize 让 PTY cols 重新计算，无副作用。
+        body = QWidget()
+        body.setStyleSheet("background: transparent; border: none;")
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(0)
+        body_layout.addWidget(terminal, 1)
+
+        scrollbar = QScrollBar(Qt.Orientation.Vertical, body)
+        scrollbar.setStyleSheet(TERMINAL_SCROLLBAR_STYLE)
+        scrollbar.setCursor(Qt.CursorShape.ArrowCursor)
+        body_layout.addWidget(scrollbar)
+
+        # 双向同步：terminal 滚动状态变 → 刷新滚动条；滚动条值变 → 设置 terminal offset。
+        # _sync_scrollbar 内部用 blockSignals 防回环，避免 valueChanged 反过来再触发它。
+        def _sync_scrollbar():
+            offset, history_len, visible_rows = terminal.get_scroll_state()
+            # 用 blockSignals 避免 setRange/setValue 触发 valueChanged 又回写 terminal,
+            # 形成 emit → set → emit 死循环。
+            scrollbar.blockSignals(True)
+            try:
+                scrollbar.setRange(0, history_len)
+                # page_step 让滑块大小反映"一屏"，方便用户感知比例
+                scrollbar.setPageStep(max(1, visible_rows))
+                scrollbar.setSingleStep(1)
+                scrollbar.setValue(scroll_offset_to_slider_value(offset, history_len))
+                # history_len == 0 时滚动条没有可拖区间，禁用更直观
+                scrollbar.setEnabled(history_len > 0)
+            finally:
+                scrollbar.blockSignals(False)
+
+        def _on_slider_changed(value: int):
+            _, history_len, _ = terminal.get_scroll_state()
+            terminal.set_scroll_offset(slider_value_to_scroll_offset(value, history_len))
+
+        terminal.scroll_state_changed.connect(_sync_scrollbar)
+        scrollbar.valueChanged.connect(_on_slider_changed)
+        # 初始同步一次（终端刚创建，history_len=0，禁用滚动条）
+        _sync_scrollbar()
+
         tl.addWidget(bar)
-        tl.addWidget(terminal, 1)
+        tl.addWidget(body, 1)
         return tile
 
     def _remove_terminal(self, slot_idx):

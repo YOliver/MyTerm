@@ -5,7 +5,12 @@ UI 行为（Shift+PageUp 等组合键拦截、`_scroll_by` 触发 widget update�
 """
 import pytest
 
-from ui.terminal_widget import clamp_scroll_offset, follow_scroll_offset_after_feed
+from ui.terminal_widget import (
+    clamp_scroll_offset,
+    follow_scroll_offset_after_feed,
+    scroll_offset_to_slider_value,
+    slider_value_to_scroll_offset,
+)
 
 
 @pytest.mark.parametrize("offset,history_len,expected", [
@@ -56,3 +61,39 @@ class TestFollowScrollOffsetAfterFeed:
     def test_paused_negative_growth_treated_as_zero(self):
         # 极端兜底：history 因为某种重置反而变短，不应让 offset 倒退成负数
         assert follow_scroll_offset_after_feed(50, 100, 80) == 50
+
+
+class TestScrollSliderConversion:
+    """覆盖 _scroll_offset 与 QScrollBar.value 的反向映射。
+
+    QScrollBar 习惯：value=0 在顶（看最旧），value=max 在底（看最新）。
+    项目内部反过来：scroll_offset=0 看最新，scroll_offset=history_len 看最旧。
+    所以两边互为反向。
+    """
+
+    def test_offset_zero_means_slider_at_bottom(self):
+        # 贴底（看最新）→ slider value 应该是最大
+        assert scroll_offset_to_slider_value(0, 100) == 100
+
+    def test_offset_max_means_slider_at_top(self):
+        # 顶端（看最旧）→ slider value 应该是 0
+        assert scroll_offset_to_slider_value(100, 100) == 0
+
+    def test_offset_middle_maps_to_middle(self):
+        # 中间值
+        assert scroll_offset_to_slider_value(30, 100) == 70
+
+    def test_slider_to_offset_is_inverse(self):
+        # 来回换算应该回到原值
+        for offset in (0, 1, 50, 99, 100):
+            slider = scroll_offset_to_slider_value(offset, 100)
+            assert slider_value_to_scroll_offset(slider, 100) == offset
+
+    def test_empty_history_clamps_to_zero(self):
+        assert scroll_offset_to_slider_value(0, 0) == 0
+        assert slider_value_to_scroll_offset(0, 0) == 0
+
+    def test_slider_value_clamped(self):
+        # slider 值越界（超大 / 负数）也要 clamp 到合法 offset
+        assert slider_value_to_scroll_offset(9999, 100) == 0  # 越大 → offset 越小，下夹到 0
+        assert slider_value_to_scroll_offset(-5, 100) == 100  # 负值 → offset 越大，上夹到 history_len

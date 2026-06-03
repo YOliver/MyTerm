@@ -25,10 +25,28 @@ class FakeBackend(QObject):
         return False
 
 
+class FakeTerminal(QWidget):
+    """假终端：提供 _make_tile 内部需要的滚动条同步契约。
+
+    需要 scroll_state_changed 信号 + get_scroll_state() / set_scroll_offset()
+    方法。槽位清理测试不关心滚动行为，给个空桩即可。
+    """
+    scroll_state_changed = Signal()
+
+    def __init__(self, *args, **kwargs):
+        super().__init__()
+
+    def get_scroll_state(self):
+        return 0, 0, 24
+
+    def set_scroll_offset(self, _offset):
+        pass
+
+
 @pytest.fixture
 def main_window(qapp):
     with patch("ui.main_window.TerminalBackend", FakeBackend), \
-         patch("ui.main_window.TerminalWidget", lambda backend, **kw: QWidget()):
+         patch("ui.main_window.TerminalWidget", FakeTerminal):
         win = MainWindow()
         yield win
         win.close()
@@ -37,7 +55,7 @@ def main_window(qapp):
 def test_process_exit_releases_slot(main_window):
     """backend.process_exited 信号应触发槽位释放。"""
     backend = FakeBackend()
-    terminal = QWidget()
+    terminal = FakeTerminal()
     tile = main_window._make_tile("C:\\test", terminal, slot_idx=0)
     main_window._slots[0] = Slot(backend, terminal, tile)
     # 模拟 _add_terminal 中的信号连接
@@ -54,7 +72,7 @@ def test_process_exit_releases_slot(main_window):
 def test_slot_reusable_after_exit(main_window):
     """槽位释放后应能被新终端复用。"""
     backend = FakeBackend()
-    terminal = QWidget()
+    terminal = FakeTerminal()
     tile = main_window._make_tile("C:\\test", terminal, slot_idx=0)
     main_window._slots[0] = Slot(backend, terminal, tile)
     backend.process_exited.connect(lambda _code, i=0: main_window._remove_terminal(i))
@@ -73,7 +91,7 @@ def test_multiple_slots_independent_cleanup(main_window):
     backends = []
     for i in range(3):
         backend = FakeBackend()
-        terminal = QWidget()
+        terminal = FakeTerminal()
         tile = main_window._make_tile("C:\\test", terminal, slot_idx=i)
         main_window._slots[i] = Slot(backend, terminal, tile)
         backend.process_exited.connect(lambda _code, idx=i: main_window._remove_terminal(idx))
@@ -93,7 +111,7 @@ def test_multiple_slots_independent_cleanup(main_window):
 def test_double_exit_signal_no_crash(main_window):
     """process_exited 重复触发不应崩溃（槽位已为空时跳过）。"""
     backend = FakeBackend()
-    terminal = QWidget()
+    terminal = FakeTerminal()
     tile = main_window._make_tile("C:\\test", terminal, slot_idx=0)
     main_window._slots[0] = Slot(backend, terminal, tile)
     backend.process_exited.connect(lambda _code, i=0: main_window._remove_terminal(i))

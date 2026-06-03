@@ -2,7 +2,7 @@ import logging
 
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
-from PySide6.QtCore import Qt, QTimer, QEvent, QRectF
+from PySide6.QtCore import Qt, QTimer, QEvent, QRectF, Signal
 from pyte.screens import HistoryScreen
 import pyte
 import weakref
@@ -77,6 +77,21 @@ def follow_scroll_offset_after_feed(
     return clamp_scroll_offset(prev_offset + grew, new_history_len)
 
 
+def scroll_offset_to_slider_value(scroll_offset: int, history_len: int) -> int:
+    """把 _scroll_offset 转成 QScrollBar 的 value。
+
+    QScrollBar 习惯：value=最大 → 滑块在底（看最新）；value=0 → 滑块在顶（看最旧）。
+    项目内部 _scroll_offset：0=最新，history_len=最旧（与 QScrollBar 反向）。
+    所以 slider_value = history_len - scroll_offset。
+    """
+    return clamp_scroll_offset(history_len - scroll_offset, history_len)
+
+
+def slider_value_to_scroll_offset(slider_value: int, history_len: int) -> int:
+    """把 QScrollBar 的 value 反向转回 _scroll_offset。和上面对称。"""
+    return clamp_scroll_offset(history_len - slider_value, history_len)
+
+
 def is_real_selection(
     sel_start: tuple[int, int] | None,
     sel_end: tuple[int, int] | None,
@@ -117,9 +132,15 @@ def cell_width(ch: str) -> int:
 
 
 class TerminalWidget(QWidget):
+    # 滚动状态变化时通知外部（用来同步右侧 QScrollBar）。
+    # 任何会动到 _scroll_offset 或 history_len 的路径（_on_data / _scroll_by /
+    # _scroll_to_top / _scroll_to_bottom / set_scroll_offset / resize 后的 update）
+    # 都要 emit 一下；外部根据三元组重建滚动条 range/value/page_step。
+    scroll_state_changed = Signal()
+
     # 跨实例「当前选区持有者」弱引用：
     # 用户在 A 终端拖出选区、再到 B 终端右键时，B 需要拿到 A 的选区文本来复制。
-    # 用 weakref 不阻止 widget 析构；多实例时只跟踪「最近一次产生选区」的那个，
+    # 用 weakref 不阻止 widget 析构；多实例时只跟踪「最近一次产生选区」的那个,
     # 与 Windows Terminal 的「最后一次选区」语义一致。任何路径清空选区时都要
     # 把这里同步清掉，避免引用悬空。
     _selection_owner: "weakref.ReferenceType[TerminalWidget] | None" = None
@@ -180,6 +201,8 @@ class TerminalWidget(QWidget):
         self._screen.resize(rows, cols)
         self._backend.resize(cols, rows)
         self.update()
+        # 行数变化会改变 page_step（滚动条滑块大小），通知外部重算
+        self.scroll_state_changed.emit()
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
@@ -202,6 +225,9 @@ class TerminalWidget(QWidget):
         # 否则其它终端右键时还能"复制"到一段早已不存在的内容。
         self._clear_selection(repaint=False)
         self.update()
+        # history 几乎每次都在变（即便 offset 没动），滚动条的 range/value
+        # 都需要重算，所以无条件通知。
+        self.scroll_state_changed.emit()
 
     def _on_exit(self, exit_code):
         logger.info("TerminalWidget 收到进程退出信号: exit_code=%d, widget=%s",
@@ -356,17 +382,34 @@ class TerminalWidget(QWidget):
         if new_offset != self._scroll_offset:
             self._scroll_offset = new_offset
             self.update()
+            self.scroll_state_changed.emit()
 
     def _scroll_to_top(self) -> None:
         history_len = len(self._screen.history.top)
         if self._scroll_offset != history_len:
             self._scroll_offset = history_len
             self.update()
+            self.scroll_state_changed.emit()
 
     def _scroll_to_bottom(self) -> None:
         if self._scroll_offset != 0:
             self._scroll_offset = 0
             self.update()
+            self.scroll_state_changed.emit()
+
+    def set_scroll_offset(self, offset: int) -> None:
+        """外部（右侧 QScrollBar 拖动）设置滚动偏移；做 clamp 后回写。"""
+        history_len = len(self._screen.history.top)
+        new_offset = clamp_scroll_offset(offset, history_len)
+        if new_offset != self._scroll_offset:
+            self._scroll_offset = new_offset
+            self.update()
+            # 注意：这里**不**再 emit scroll_state_changed —— 调用方就是滚动条本身,
+            # 让滚动条响应自己 emit 的信号会引起反向同步循环。
+
+    def get_scroll_state(self) -> tuple[int, int, int]:
+        """返回 (scroll_offset, history_len, visible_rows) 三元组，给外部刷新滚动条用。"""
+        return self._scroll_offset, len(self._screen.history.top), self._screen.lines
 
     def _to_qcolor(self, color_str):
         if color_str in NAMED_COLORS:
