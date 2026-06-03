@@ -147,10 +147,16 @@ class MainWindow(QMainWindow):
             return
         preset = presets[combo_idx]
         logger.info("选中预设: label=%s host=%s cmd=%s", preset.label, preset.host, preset.raw_command)
+        # 每步都打 INFO 级时间戳：休眠唤醒后曾出现 _on_launch 进入但后续静默无日志、
+        # UI 卡死的现象（见 myterm.log 2026-06-03 10:56:58）。细化日志才能定位卡点。
+        logger.info("_on_launch: 写入路径历史 path=%s", path)
         self._history.add(path)
+        logger.info("_on_launch: 刷新路径下拉框")
         self._load_history()
         cmdline = list(preset.command)
+        logger.info("_on_launch: 进入 _add_terminal cmd=%s", cmdline)
         self._add_terminal(path, cmdline)
+        logger.info("_on_launch: 完成")
 
     def _add_terminal(self, path, cmdline=None):
         idx = self._find_empty_slot()
@@ -161,10 +167,16 @@ class MainWindow(QMainWindow):
 
         logger.info("创建终端会话: slot=%d path=%s cmd=%s (已用=%d/%d)",
                      idx, path, cmdline, self._active_count(), self._config.max_terminals)
+        # 拆解每个子步骤的日志：start_shell 内部走 PtyProcess.spawn，
+        # 是历史上最容易因系统资源（PTY 句柄、ConPTY）卡住的位置。
+        logger.debug("_add_terminal: 构造 backend")
         backend = TerminalBackend()
+        logger.debug("_add_terminal: 构造 TerminalWidget")
         terminal = TerminalWidget(backend)
+        logger.debug("_add_terminal: 调用 start_shell")
         backend.start_shell(cwd=path, columns=terminal.columns,
                             rows=terminal.rows, cmdline=cmdline)
+        logger.debug("_add_terminal: start_shell 返回, 连接 process_exited")
         # 进程退出时自动释放槽位，防止僵尸槽位堆积
         backend.process_exited.connect(lambda _code, i=idx: self._remove_terminal(i))
 

@@ -70,5 +70,14 @@ class TerminalBackend(QThread):
                      pid, self._process is not None, alive)
         if self._process:
             self._process.close()
-        if not self.wait(1000):
-            logger.warning("终端线程未在 1s 内退出, pid=%s", pid)
+        # 正常路径下 close() 会让 read() 抛 EOFError，run() 退出。
+        # 兜底场景：系统休眠唤醒后 winpty 句柄进入僵死状态，read() 既不返回也不抛，
+        # 线程永远卡在 PtyProcess.read(4096) —— 必须强制终止，否则槽位虽被释放
+        # 但 QThread 仍在跑、占着资源，连带主线程后续 UI 操作（启动新终端）异常。
+        if not self.wait(2000):
+            logger.warning("终端线程 2s 内未退出, 强制 terminate, pid=%s", pid)
+            self.terminate()
+            if not self.wait(500):
+                logger.error("terminate 后线程仍未退出, pid=%s (放弃, 可能资源泄漏)", pid)
+            else:
+                logger.info("终端线程已强制终止, pid=%s", pid)
