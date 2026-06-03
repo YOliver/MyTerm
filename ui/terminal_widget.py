@@ -54,6 +54,29 @@ def clamp_scroll_offset(offset: int, history_len: int) -> int:
     return offset
 
 
+def follow_scroll_offset_after_feed(
+    prev_offset: int,
+    prev_history_len: int,
+    new_history_len: int,
+) -> int:
+    """新输出 feed 完后该把 _scroll_offset 调到哪里。
+
+    规则：
+    - prev_offset == 0：用户原本就在底部跟随，继续保持在底部（返回 0）。
+    - prev_offset > 0：用户已上滑查看历史，应保持视野静止——
+      把 history 因为新输出而新增的行数补偿到 offset 上。
+      history 触顶溢出（最旧的行被 deque 挤掉）时，溢出的那部分历史
+      已不存在，无法再补偿，视图会自然向下漂一点；这是 ring buffer
+      的固有限制，clamp 到合法区间即可。
+    """
+    if prev_offset <= 0:
+        return 0
+    grew = new_history_len - prev_history_len
+    if grew < 0:
+        grew = 0
+    return clamp_scroll_offset(prev_offset + grew, new_history_len)
+
+
 def is_real_selection(
     sel_start: tuple[int, int] | None,
     sel_end: tuple[int, int] | None,
@@ -163,8 +186,17 @@ class TerminalWidget(QWidget):
         self._resize_timer.start(200)
 
     def _on_data(self, data):
+        # 用户上滑查看历史（_scroll_offset > 0）时不应被新输出弹回底部，
+        # 否则 tail -f / build 输出狂刷时根本没法看历史。
+        # 只有原本就贴在底部（offset == 0）才跟随；否则按 history 增长量
+        # 补偿 offset 让视野静止。
+        prev_offset = self._scroll_offset
+        prev_history_len = len(self._screen.history.top)
         self._stream.feed(data)
-        self._scroll_offset = 0
+        new_history_len = len(self._screen.history.top)
+        self._scroll_offset = follow_scroll_offset_after_feed(
+            prev_offset, prev_history_len, new_history_len,
+        )
         # 收到 PTY 新输出会让选区坐标失效（屏幕滚动 / 内容覆盖），统一清掉。
         # 走 _clear_selection 是为了同时解除全局 _selection_owner 引用，
         # 否则其它终端右键时还能"复制"到一段早已不存在的内容。
