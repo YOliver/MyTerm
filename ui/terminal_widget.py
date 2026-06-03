@@ -280,8 +280,12 @@ class TerminalWidget(QWidget):
                 if x > self.width():
                     break
                 char = line.get(col)
-                if char and char.data and char.data != " ":
-                    w = cell_width(char.data)
+                # CLI 工具（claude/codebuddy 等）用「反色 + 空格」画伪光标，
+                # 不能因为 char.data == " " 就跳过反色处理，否则光标方块画不出来。
+                has_real_char = bool(char and char.data and char.data != " ")
+                is_reverse_space = bool(char and char.reverse and not has_real_char)
+                if has_real_char or is_reverse_space:
+                    w = cell_width(char.data) if has_real_char else 1
                     px_width = self._char_width * w
                     bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
                     if char.reverse:
