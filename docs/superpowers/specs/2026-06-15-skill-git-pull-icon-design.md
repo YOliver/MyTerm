@@ -11,18 +11,31 @@
 
 ## 检测规则
 
-在 skill 目录下检查是否包含 `.git` 子目录：
+通过 `git rev-parse --is-inside-work-tree` 命令判断 skill 目录是否为 git 仓库：
 
-```
-.codebuddy/skills/some-skill/.git  → 是 git 仓库
-.codebuddy/skills/other-skill/     → 不是 git 仓库（无 .git）
+```python
+def _is_git_repo(path: Path) -> bool:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=str(path), capture_output=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 ```
 
-仅检查 skill 目录本身是否是 git 仓库根目录，不递归检查父目录。覆盖最常见场景（`git clone` 到 skills 目录）。
+相比检查 `.git` 子目录，此方法同时覆盖普通 clone 和 git worktree 场景（worktree 下 `.git` 是文件而非目录）。
 
 ## 数据层变更
 
 ### `store/skills_manager.py`
+
+**新增 import：**
+
+```python
+import subprocess
+```
 
 **`SkillInfo` 新增字段：**
 
@@ -36,9 +49,9 @@ class SkillInfo:
     is_git: bool = False  # 新增
 ```
 
-**`scan_skills()` 增加 git 检测：**
+**新增 `_is_git_repo()` 辅助函数，`scan_skills()` 调用它检测 git：**
 
-扫描每个 skill 时检查 `entry / ".git"` 是否为目录，设为 `is_git` 的值。
+扫描每个 skill 时调用 `_is_git_repo(entry)`，将结果赋值给 `is_git`。
 
 **新增 `git_pull_skill()` 函数：**
 
@@ -47,11 +60,34 @@ def git_pull_skill(cli_id: str, skill_name: str, enabled: bool) -> tuple[bool, s
     """在 skill 目录执行 git pull，返回 (成功, 输出信息)。"""
 ```
 
-拼接 skill 目录路径，执行 `git pull`，收集 stdout/stderr，返回结果。
+路径构造复用 `load_skill_content()` 逻辑：
+
+```python
+skills_root = CLI_SKILLS_DIRS.get(cli_id)
+base = skills_root if enabled else _disabled_dir(skills_root)
+skill_dir = base / skill_name
+```
+
+通过 `subprocess.run(["git", "pull"], cwd=skill_dir, capture_output=True, text=True, timeout=30)` 执行。
+
+异常处理：
+
+| 场景 | 处理 |
+|------|------|
+| git 未安装 | 捕获 `FileNotFoundError`，返回 `(False, "未找到 git 命令")` |
+| 超时 | `timeout=30`，超时返回 `(False, "git pull 超时（30s）")` |
+| pull 失败 | git 返回码非 0，合并 stdout+stderr 返回 `(False, ...)` |
+| 目录不存在 | 返回 `(False, "skill 目录不存在")` |
 
 ## UI 层变更
 
 ### `ui/skills_dialog.py`
+
+**新增 import：**
+
+```python
+from PySide6.QtWidgets import QMessageBox
+```
 
 **`_rebuild_skill_list()` 每行布局变更：**
 
@@ -91,6 +127,7 @@ skill.is_git == False → 图标置灰，setEnabled(False)
 ## 影响分析
 
 - `SkillInfo.is_git` 默认值 `False`，`scan_skills()` 才设为 `True`，向后兼容
+- `_is_git_repo()` 使用 `subprocess.run` 调用 git 命令，兼容普通 clone 和 worktree 场景
 - `git_pull_skill()` 在非 git 目录不会被执行（UI 已禁用），因此不需要额外防御
 - 无新增 Python 依赖（使用标准库 `subprocess`）
 - 现有测试保持通过（`test_skills_manager.py` 需小幅更新以适配新字段）
