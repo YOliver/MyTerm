@@ -7,4 +7,4 @@
 - ``scripts/release.bat`` 用它命名 ``MyTerm-Setup-x.y.z.exe``。
 """
 
-__version__ = "0.2.2"
+__version__ = "0.2.3"
