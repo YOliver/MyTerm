@@ -3,13 +3,14 @@ import os
 from collections import namedtuple
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QMessageBox, QFileDialog, QLabel, QSizePolicy, QScrollBar,
 )
 
 from store.path_history import PathHistory
-from store.config import AppConfig, compute_grid_shape
+from store.config import AppConfig, compute_grid_shape, compute_grid_shape_for, LayoutMode
 from backend.terminal_backend import TerminalBackend
 from ui.terminal_widget import (
     TerminalWidget,
@@ -329,25 +330,23 @@ class MainWindow(QMainWindow):
         return sum(1 for s in self._slots if s is not None)
 
     def _relayout(self) -> None:
-        # 1) 移除旧 widgets
+        # 1) 移除旧 widgets（包括占位符）
         for i in reversed(range(self._grid.count())):
             item = self._grid.itemAt(i)
             if item and item.widget():
                 self._grid.removeWidget(item.widget())
 
-        # 2) 收集非空 tile（保留 slot 索引用于日志）
+        # 2) 收集非空 tile
         tiles = [s for s in self._slots if s is not None]
-        tile_indices = [i for i, s in enumerate(self._slots) if s is not None]
         count = len(tiles)
         if count == 0:
-            logger.debug("_relayout: 无终端, 跳过")
             return
 
-        # 3) 按通用算法计算最接近正方形的网格
-        rows, cols = compute_grid_shape(count)
-        logger.debug("_relayout: tile_slots=%s, grid=%dx%d", tile_indices, rows, cols)
+        # 3) 根据布局模式计算行列
+        rows, cols = compute_grid_shape_for(count, self._config.layout_mode)
+        total_cells = rows * cols
 
-        # 4) 清掉所有旧 stretch（防止上次更大网格残留 stretch=1 的空行/空列）
+        # 4) 清掉所有旧 stretch
         for r in range(self._grid.rowCount()):
             self._grid.setRowStretch(r, 0)
         for c in range(self._grid.columnCount()):
@@ -359,9 +358,30 @@ class MainWindow(QMainWindow):
         for c in range(cols):
             self._grid.setColumnStretch(c, 1)
 
-        # 6) 逐个 addWidget，全部 1×1
+        # 6) 放置 tile
         for i, slot in enumerate(tiles):
             self._grid.addWidget(slot.tile, i // cols, i % cols)
+
+        # 7) 固定模式下填占位符
+        if self._config.layout_mode != LayoutMode.AUTO:
+            for i in range(count, total_cells):
+                placeholder = QWidget()
+                placeholder.setStyleSheet(
+                    "background: #1a1a1a; border: 1px solid #333; border-radius: 2px;"
+                )
+                self._grid.addWidget(placeholder, i // cols, i % cols)
+
+    def _on_layout_switch(self, mode) -> None:
+        """视图菜单切换布局模式。"""
+        self._config.layout_mode = mode
+        self._config.save()
+        self._update_layout_menu_check()
+        self._relayout()
+
+    def _update_layout_menu_check(self) -> None:
+        """同步菜单选中状态。"""
+        for mode, action in self._layout_actions.items():
+            action.setChecked(mode == self._config.layout_mode)
 
     def _load_history(self):
         paths = self._history.all()
@@ -389,6 +409,24 @@ class MainWindow(QMainWindow):
             "QMenu::item { padding: 6px 24px; }"
             "QMenu::item:selected { background: #094771; }"
         )
+        # ── 视图 ──
+        view_menu = menubar.addMenu("视图")
+        self._layout_actions: dict[LayoutMode, QAction] = {}
+        for mode, label in [
+            (LayoutMode.AUTO, "自动布局"),
+            (LayoutMode.QUAD, "四象限 2×2"),
+            (LayoutMode.HORIZONTAL, "横排 1×N"),
+            (LayoutMode.VERTICAL, "竖排 N×1"),
+        ]:
+            action = view_menu.addAction(label)
+            action.setCheckable(True)
+            action.triggered.connect(
+                lambda _checked, m=mode: self._on_layout_switch(m)
+            )
+            self._layout_actions[mode] = action
+        self._update_layout_menu_check()
+
+        # ── 环境 ──
         env_menu = menubar.addMenu("环境")
         check_action = env_menu.addAction("检测依赖")
         check_action.triggered.connect(self._on_check_env)
