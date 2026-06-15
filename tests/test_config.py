@@ -125,3 +125,46 @@ def test_compute_grid_shape_for_vertical():
     assert compute_grid_shape_for(4, LayoutMode.VERTICAL) == (4, 1)
     assert compute_grid_shape_for(1, LayoutMode.VERTICAL) == (1, 1)
     assert compute_grid_shape_for(0, LayoutMode.VERTICAL) == (1, 1)
+
+
+# ── AppConfig layout_mode 持久化 ──
+
+def test_app_config_layout_mode_default(tmp_path, monkeypatch):
+    """无 config.json 时默认 AUTO。"""
+    import store.paths as _paths
+    monkeypatch.setattr(_paths, "data_dir", lambda: tmp_path)
+    from store.config import AppConfig
+    cfg = AppConfig()
+    assert cfg.layout_mode == LayoutMode.AUTO
+
+
+def test_app_config_layout_mode_persist(tmp_path, monkeypatch):
+    """写入 QUAD 后重新加载，layout_mode 不变。"""
+    import store.paths as _paths
+    monkeypatch.setattr(_paths, "data_dir", lambda: tmp_path)
+    from store.config import AppConfig, LayoutMode
+    cfg = AppConfig()
+    cfg.layout_mode = LayoutMode.QUAD
+    cfg.save()
+
+    cfg2 = AppConfig()
+    assert cfg2.layout_mode == LayoutMode.QUAD
+
+
+def test_app_config_save_preserves_existing_keys(tmp_path, monkeypatch):
+    """save() 不会覆盖 config.json 中已有字段。"""
+    import store.paths as _paths
+    monkeypatch.setattr(_paths, "data_dir", lambda: tmp_path)
+    (tmp_path / "config.json").write_text(
+        '{"max_terminals": 4, "layout_mode": "auto"}', encoding="utf-8",
+    )
+    from store.config import AppConfig
+    cfg = AppConfig()
+    cfg.layout_mode = LayoutMode.VERTICAL
+    cfg.save()
+
+    saved = tmp_path / "config.json"
+    import json
+    data = json.loads(saved.read_text(encoding="utf-8"))
+    assert data["layout_mode"] == "v"
+    assert data["max_terminals"] == 4

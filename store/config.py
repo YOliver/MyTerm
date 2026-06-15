@@ -8,6 +8,7 @@ Shell / CLI 预设原本硬编码在这里，已迁移到 ``store/shell_presets.
 """
 from __future__ import annotations
 
+import json
 import logging
 from enum import Enum
 
@@ -72,15 +73,36 @@ def compute_grid_shape_for(n: int, mode: LayoutMode) -> tuple[int, int]:
 
 class AppConfig:
     """聚合槽位上限 + shell 预设入口。预设来自 ``shell_presets.json``。"""
+    _CONFIG_FILE = "config.json"
 
     def __init__(self) -> None:
+        from store import paths
+        self._config_path = paths.data_dir() / self._CONFIG_FILE
+        data = self._load_json()
+        self.layout_mode: LayoutMode = LayoutMode(data.get("layout_mode", "auto"))
         self._max_terminals = min(max(MAX_TERMINALS, 1), _HARD_MAX_TERMINALS)
         # 延迟 import 避免 store 内部循环依赖（shell_presets 也用 store.paths）
         from store import shell_presets
         self._shell_presets_module = shell_presets
         self._shell_presets = shell_presets.load()
-        logger.info("配置加载完成: max_terminals=%d, presets=%d",
-                     self._max_terminals, len(self._shell_presets))
+        logger.info("配置加载完成: max_terminals=%d, layout_mode=%s, presets=%d",
+                     self._max_terminals, self.layout_mode.value, len(self._shell_presets))
+
+    def _load_json(self) -> dict:
+        try:
+            return json.loads(self._config_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return {}
+
+    def save(self) -> None:
+        """保存可写配置项到 config.json（原子写入）。"""
+        data = self._load_json()
+        data["layout_mode"] = self.layout_mode.value
+        data["max_terminals"] = self._max_terminals
+        self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._config_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self._config_path)
 
     @property
     def max_terminals(self) -> int:

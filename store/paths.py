@@ -71,6 +71,11 @@ def _env_dir(var: str, fallback: Path) -> Path:
     return fallback
 
 
+def data_dir() -> Path:
+    """数据目录（config.json 等配置文件）。与 local_data_dir 同义。"""
+    return local_data_dir()
+
+
 def local_data_dir() -> Path:
     """本机数据目录（不漫游）。
 
