@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,11 +20,13 @@ class SkillInfo:
     - ``description``：SKILL.md frontmatter 中的 description，解析失败时用首行兜底
     - ``enabled``：是否在 ``skills/`` 下（True）还是 ``skills-disabled/`` 下（False）
     - ``cli_id``：所属 CLI 的 ID，与 InstallerSpec.id 对齐
+    - ``is_git``：skill 目录是否在 git 仓库中
     """
     name: str
     description: str
     enabled: bool
     cli_id: str
+    is_git: bool = False
 
 
 # 写死各 CLI 的 skills 根目录。CLI 未安装时目录可能不存在，scan_skills() 会返回空列表。
@@ -50,6 +53,18 @@ def _disabled_dir(skills_root: Path) -> Path:
     parent = skills_root.parent
     name = skills_root.name
     return parent / f"{name}-disabled"
+
+
+def _is_git_repo(path: Path) -> bool:
+    """通过 git rev-parse 判断目录是否在 git 仓库中。"""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=str(path), capture_output=True, timeout=5,
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
 
 
 def _parse_skill_md(filepath: Path) -> tuple[str, str]:

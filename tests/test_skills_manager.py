@@ -200,3 +200,61 @@ def test_load_skill_content_disabled(tmp_path: Path, monkeypatch):
 
 def test_disabled_dir_naming():
     assert _disabled_dir(Path("/home/user/.claude/skills")) == Path("/home/user/.claude/skills-disabled")
+
+
+# ── _is_git_repo ──
+
+def test_is_git_repo_true(tmp_path: Path, monkeypatch):
+    """模拟 git rev-parse 返回 0（是 git 仓库）。"""
+    from store.skills_manager import _is_git_repo, CLI_SKILLS_DIRS
+
+    monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
+    import subprocess as _sp
+
+    class FakeResult:
+        returncode = 0
+
+    def fake_run(*args, **kwargs):
+        return FakeResult()
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    assert _is_git_repo(tmp_path) is True
+
+
+def test_is_git_repo_false(tmp_path: Path, monkeypatch):
+    """模拟 git rev-parse 返回非 0（不是 git 仓库）。"""
+    from store.skills_manager import _is_git_repo
+    import subprocess as _sp
+
+    class FakeResult:
+        returncode = 1
+
+    def fake_run(*args, **kwargs):
+        return FakeResult()
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    assert _is_git_repo(tmp_path) is False
+
+
+def test_is_git_repo_no_git(tmp_path: Path, monkeypatch):
+    """模拟 git 命令不存在（FileNotFoundError）。"""
+    from store.skills_manager import _is_git_repo
+    import subprocess as _sp
+
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    assert _is_git_repo(tmp_path) is False
+
+
+def test_is_git_repo_timeout(tmp_path: Path, monkeypatch):
+    """模拟 git 命令超时。"""
+    from store.skills_manager import _is_git_repo
+    import subprocess as _sp
+
+    def fake_run(*args, **kwargs):
+        raise _sp.TimeoutExpired(cmd="git", timeout=5)
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    assert _is_git_repo(tmp_path) is False
