@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QScrollArea,
     QTextEdit,
@@ -22,6 +23,7 @@ from store.skills_manager import (
     CLI_DISPLAY_NAMES,
     CLI_SKILLS_DIRS,
     SkillInfo,
+    git_pull_skill,
     load_skill_content,
     open_skills_dir,
     scan_skills,
@@ -235,9 +237,32 @@ class SkillsDialog(QDialog):
         for skill in skills:
             row_widget = QWidget()
             row_widget.setStyleSheet("QWidget { background: #1e1e1e; }")
-            row_layout = QVBoxLayout(row_widget)
+            row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(4, 3, 4, 3)
-            row_layout.setSpacing(1)
+            row_layout.setSpacing(4)
+
+            # 更新图标按钮
+            icon_btn = QPushButton("↑", row_widget)
+            icon_btn.setFixedWidth(24)
+            icon_btn.setFlat(True)
+            if skill.is_git:
+                icon_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                icon_btn.setStyleSheet(
+                    "QPushButton { color: #aaa; font-size: 14px; background: transparent;"
+                    " border: none; padding: 0; }"
+                    "QPushButton:hover { color: #fff; }"
+                )
+                icon_btn.clicked.connect(
+                    self._make_pull_handler(skill)
+                )
+            else:
+                icon_btn.setEnabled(False)
+                icon_btn.setStyleSheet(
+                    "QPushButton { color: #555; font-size: 14px; background: transparent;"
+                    " border: none; padding: 0; }"
+                )
+
+            row_layout.addWidget(icon_btn)
 
             name_btn = QPushButton(skill.name, row_widget)
             name_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -245,8 +270,8 @@ class SkillsDialog(QDialog):
             name_btn.clicked.connect(
                 lambda _checked, btn=name_btn, n=skill.name: self._select_skill(btn, n)
             )
+            row_layout.addWidget(name_btn, 1)
 
-            row_layout.addWidget(name_btn)
             self._skill_layout.addWidget(row_widget)
 
         self._skill_layout.addStretch()
@@ -298,3 +323,17 @@ class SkillsDialog(QDialog):
             skill = skills[0]
         content = load_skill_content(self._current_cli, skill.name, skill.enabled)
         SkillPreviewDialog(skill.name, content, self).exec()
+
+    def _make_pull_handler(self, skill: SkillInfo):
+        """返回一个闭包，用于点击图标时触发 git pull。"""
+        def handler(_checked: bool | None = None) -> None:
+            self._on_pull_skill(skill)
+        return handler
+
+    def _on_pull_skill(self, skill: SkillInfo) -> None:
+        """执行 git pull 并弹出结果提示。"""
+        ok, msg = git_pull_skill(skill.cli_id, skill.name, skill.enabled)
+        if ok:
+            QMessageBox.information(self, "git pull 成功", msg)
+        else:
+            QMessageBox.warning(self, "git pull 失败", msg)
