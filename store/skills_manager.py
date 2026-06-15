@@ -214,3 +214,29 @@ def open_skills_dir(cli_id: str) -> None:
         return
     if skills_root.is_dir():
         os.startfile(str(skills_root))
+
+
+def git_pull_skill(cli_id: str, skill_name: str, enabled: bool) -> tuple[bool, str]:
+    """在 skill 目录执行 git pull，返回 (成功, 输出信息)。"""
+    skills_root = CLI_SKILLS_DIRS.get(cli_id)
+    if skills_root is None:
+        return False, "未知的 CLI"
+    base = skills_root if enabled else _disabled_dir(skills_root)
+    skill_dir = base / skill_name
+    if not skill_dir.is_dir():
+        return False, "skill 目录不存在"
+    try:
+        result = subprocess.run(
+            ["git", "pull"],
+            cwd=str(skill_dir),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except FileNotFoundError:
+        return False, "未找到 git 命令"
+    except subprocess.TimeoutExpired:
+        return False, "git pull 超时（30s）"
+    if result.returncode != 0:
+        return False, (result.stdout + result.stderr).strip() or "git pull 失败"
+    return True, (result.stdout or "OK").strip()

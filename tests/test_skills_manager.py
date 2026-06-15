@@ -296,3 +296,85 @@ def test_scan_skills_detects_git(tmp_path: Path, monkeypatch):
     assert len(results) == 2
     assert results[0].is_git is True
     assert results[1].is_git is False
+
+
+# ── git_pull_skill ──
+
+def test_git_pull_success(tmp_path: Path, monkeypatch):
+    """模拟 git pull 成功。"""
+    from store.skills_manager import git_pull_skill, CLI_SKILLS_DIRS
+    import subprocess as _sp
+
+    monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
+    (tmp_path / "s").mkdir()
+
+    class FakeResult:
+        returncode = 0
+        stdout = "Already up to date.\n"
+        stderr = ""
+
+    def fake_run(*args, **kwargs):
+        return FakeResult()
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    ok, msg = git_pull_skill("test_cli", "s", enabled=True)
+    assert ok is True
+    assert "up to date" in msg
+
+
+def test_git_pull_failure(tmp_path: Path, monkeypatch):
+    """模拟 git pull 失败。"""
+    from store.skills_manager import git_pull_skill, CLI_SKILLS_DIRS
+    import subprocess as _sp
+
+    monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
+    (tmp_path / "s").mkdir()
+
+    class FakeResult:
+        returncode = 1
+        stdout = ""
+        stderr = "fatal: not a git repository\n"
+
+    def fake_run(*args, **kwargs):
+        return FakeResult()
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    ok, msg = git_pull_skill("test_cli", "s", enabled=True)
+    assert ok is False
+    assert "fatal" in msg
+
+
+def test_git_pull_no_git_cmd(tmp_path: Path, monkeypatch):
+    """模拟 git 命令不存在。"""
+    from store.skills_manager import git_pull_skill, CLI_SKILLS_DIRS
+    import subprocess as _sp
+
+    monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
+    (tmp_path / "s").mkdir()
+
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+    ok, msg = git_pull_skill("test_cli", "s", enabled=True)
+    assert ok is False
+    assert "未找到 git" in msg
+
+
+def test_git_pull_skill_dir_missing(tmp_path: Path, monkeypatch):
+    """skill 目录不存在时返回失败。"""
+    from store.skills_manager import git_pull_skill, CLI_SKILLS_DIRS
+
+    monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
+    # 不创建目录
+    ok, msg = git_pull_skill("test_cli", "ghost", enabled=True)
+    assert ok is False
+    assert "不存在" in msg
+
+
+def test_git_pull_unknown_cli():
+    """CLI 不存在时返回失败。"""
+    from store.skills_manager import git_pull_skill
+
+    ok, msg = git_pull_skill("fake", "x", enabled=True)
+    assert ok is False
