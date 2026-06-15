@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 
 from store.path_history import PathHistory
-from store.config import AppConfig, compute_grid_shape, compute_grid_shape_for, LayoutMode
+from store.config import AppConfig, compute_grid_shape_for, LayoutMode
 from backend.terminal_backend import TerminalBackend
 from ui.terminal_widget import (
     TerminalWidget,
@@ -334,7 +334,9 @@ class MainWindow(QMainWindow):
         for i in reversed(range(self._grid.count())):
             item = self._grid.itemAt(i)
             if item and item.widget():
-                self._grid.removeWidget(item.widget())
+                w = item.widget()
+                self._grid.removeWidget(w)
+                w.deleteLater()
 
         # 2) 收集非空 tile
         tiles = [s for s in self._slots if s is not None]
