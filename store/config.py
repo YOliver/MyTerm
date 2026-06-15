@@ -9,6 +9,7 @@ Shell / CLI 预设原本硬编码在这里，已迁移到 ``store/shell_presets.
 from __future__ import annotations
 
 import logging
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,14 @@ logger = logging.getLogger(__name__)
 _HARD_MAX_TERMINALS = 9
 
 MAX_TERMINALS = 4
+
+
+class LayoutMode(Enum):
+    """终端网格布局模式。"""
+    AUTO = "auto"
+    QUAD = "quad"
+    HORIZONTAL = "h"
+    VERTICAL = "v"
 
 
 def compute_grid_shape(n: int) -> tuple[int, int]:
@@ -47,6 +56,18 @@ def compute_grid_shape(n: int) -> tuple[int, int]:
             break
     assert best is not None
     return best
+
+
+def compute_grid_shape_for(n: int, mode: LayoutMode) -> tuple[int, int]:
+    """根据布局模式计算 (rows, cols)。"""
+    if mode == LayoutMode.QUAD:
+        return (2, 2)
+    elif mode == LayoutMode.HORIZONTAL:
+        return (1, max(n, 1))
+    elif mode == LayoutMode.VERTICAL:
+        return (max(n, 1), 1)
+    else:
+        return compute_grid_shape(n)
 
 
 class AppConfig:

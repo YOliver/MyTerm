@@ -93,3 +93,35 @@ def test_shell_preset_dataclass_equality():
 ])
 def test_compute_grid_shape(n, expected):
     assert compute_grid_shape(n) == expected
+
+
+# ── compute_grid_shape_for ──
+
+from store.config import compute_grid_shape_for, LayoutMode  # noqa: E402
+
+
+def test_compute_grid_shape_for_auto():
+    """AUTO 模式与 compute_grid_shape 结果一致。"""
+    for n in range(1, 10):
+        assert compute_grid_shape_for(n, LayoutMode.AUTO) == compute_grid_shape(n)
+
+
+def test_compute_grid_shape_for_quad():
+    """QUAD 模式固定返回 (2, 2)。"""
+    assert compute_grid_shape_for(4, LayoutMode.QUAD) == (2, 2)
+    assert compute_grid_shape_for(2, LayoutMode.QUAD) == (2, 2)
+    assert compute_grid_shape_for(1, LayoutMode.QUAD) == (2, 2)
+
+
+def test_compute_grid_shape_for_horizontal():
+    """横排模式：rows=1，cols=n（至少 1）。"""
+    assert compute_grid_shape_for(4, LayoutMode.HORIZONTAL) == (1, 4)
+    assert compute_grid_shape_for(1, LayoutMode.HORIZONTAL) == (1, 1)
+    assert compute_grid_shape_for(0, LayoutMode.HORIZONTAL) == (1, 1)
+
+
+def test_compute_grid_shape_for_vertical():
+    """竖排模式：cols=1，rows=n（至少 1）。"""
+    assert compute_grid_shape_for(4, LayoutMode.VERTICAL) == (4, 1)
+    assert compute_grid_shape_for(1, LayoutMode.VERTICAL) == (1, 1)
+    assert compute_grid_shape_for(0, LayoutMode.VERTICAL) == (1, 1)
