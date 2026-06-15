@@ -28,11 +28,12 @@ def backend(qapp):
 
 def test_stop_normal_path_does_not_terminate(backend):
     """正常情况下 wait 在 2s 内返回 True，不应触发 terminate。"""
+    fake_proc = backend._process  # 保存引用，stop() 可能置 None
     with patch.object(backend, "wait", return_value=True) as mock_wait, \
          patch.object(backend, "terminate") as mock_terminate:
         backend.stop()
         # close() 必须被调（让 read 返回）
-        backend._process.close.assert_called_once()
+        fake_proc.close.assert_called_once()
         # wait 被调一次（2s 等线程自然退出）
         assert mock_wait.call_count == 1
         # 没卡住 → 不该 terminate
@@ -42,10 +43,11 @@ def test_stop_normal_path_does_not_terminate(backend):
 def test_stop_timeout_triggers_terminate(backend):
     """wait 超时 → 必须调 terminate 兜底，否则线程僵死。"""
     # 第一次 wait 返回 False（超时），第二次返回 True（terminate 后线程退了）
+    fake_proc = backend._process  # 保存引用，stop() 可能置 None
     with patch.object(backend, "wait", side_effect=[False, True]) as mock_wait, \
          patch.object(backend, "terminate") as mock_terminate:
         backend.stop()
-        backend._process.close.assert_called_once()
+        fake_proc.close.assert_called_once()
         # wait 调用两次：一次 2s 等自然退出 + 一次 500ms 等 terminate 生效
         assert mock_wait.call_count == 2
         mock_terminate.assert_called_once()

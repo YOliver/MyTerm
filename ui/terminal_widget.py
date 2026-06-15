@@ -1,4 +1,5 @@
 import logging
+from functools import lru_cache
 
 from PySide6.QtWidgets import QWidget, QApplication
 from PySide6.QtGui import QPainter, QColor, QFont, QFontMetrics, QInputMethodEvent
@@ -116,19 +117,24 @@ _EAST_ASIAN_AMBIGUOUS_WIDE = frozenset(
 )
 
 
+@lru_cache(maxsize=4096)
+def _char_width_cached(ch: str) -> int:
+    """缓存单个字符的宽度计算，避免对相同字符重复调用 wcwidth.wcwidth。"""
+    if ch in _EAST_ASIAN_AMBIGUOUS_WIDE:
+        return 2
+    w = wcwidth.wcwidth(ch)
+    return max(w, 1)
+
+
 def cell_width(ch: str) -> int:
     """返回字符在终端里实际占的列数。空字符串/None 视为 1 格占位。
 
     歧义宽字符（_EAST_ASIAN_AMBIGUOUS_WIDE）在 CJK 环境下按 2 格处理，
-    其余依赖 wcwidth.wcwidth；wcwidth 返回 -1/0 的（控制字符等）夹到 1。
+    其余委托 _char_width_cached 缓存结果，避免重复计算。
     """
     if not ch:
         return 1
-    first = ch[0]
-    if first in _EAST_ASIAN_AMBIGUOUS_WIDE:
-        return 2
-    w = wcwidth.wcwidth(first)
-    return max(w, 1)
+    return _char_width_cached(ch[0])
 
 
 class TerminalWidget(QWidget):
@@ -306,10 +312,10 @@ class TerminalWidget(QWidget):
                 if x > self.width():
                     break
                 char = line.get(col)
-                # CLI 工具（claude/codebuddy 等）用「反色 + 空格」画伪光标，
-                # 不能因为 char.data == " " 就跳过反色处理，否则光标方块画不出来。
                 has_real_char = bool(char and char.data and char.data != " ")
                 is_reverse_space = bool(char and char.reverse and not has_real_char)
+
+                # ---- 背景 ----
                 if has_real_char or is_reverse_space:
                     w = cell_width(char.data) if has_real_char else 1
                     px_width = self._char_width * w
@@ -320,29 +326,20 @@ class TerminalWidget(QWidget):
                     if self._in_selection(idx, col):
                         bg = SEL_COLOR
                     painter.fillRect(x, y, px_width, self._char_height, bg)
-                    col += w
                 else:
+                    w = 1
+                    px_width = self._char_width
                     bg = SEL_COLOR if self._in_selection(idx, col) else DEFAULT_BG
-                    painter.fillRect(x, y, self._char_width, self._char_height, bg)
-                    col += 1
+                    painter.fillRect(x, y, px_width, self._char_height, bg)
 
-        for idx, y, line in rows:
-            col = 0
-            while col < self._screen.columns:
-                x = col * self._char_width
-                if x > self.width():
-                    break
-                char = line.get(col)
-                if char and char.data and char.data != " ":
-                    w = cell_width(char.data)
-                    px_width = self._char_width * w
+                # ---- 前景文字 ----
+                if has_real_char:
                     fg = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
-                    bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
+                    bg_for_fg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
                     if char.reverse:
-                        fg, bg = bg, fg
-                    if self._in_selection(idx, col):
-                        bg = SEL_COLOR
-
+                        fg, bg_for_fg = bg_for_fg, fg
+                    # 注意：原版第二遍里 selection 只改 bg（死代码），不改 fg，
+                    # 所以选中区文字色保持原 fg（或 reverse 后的 fg），与背景独立。
                     painter.setPen(fg)
                     if char.bold and char.italics:
                         painter.setFont(self._font_bi)
@@ -356,9 +353,8 @@ class TerminalWidget(QWidget):
                     if char.underscore:
                         painter.drawLine(x, y + self._char_height - 1,
                                          x + px_width, y + self._char_height - 1)
-                    col += w
-                else:
-                    col += 1
+
+                col += w
 
         if self._cursor_visible and self._scroll_offset == 0 and not self._screen.cursor.hidden:
             cx = self._screen.cursor.x * self._char_width

@@ -301,6 +301,13 @@ class MainWindow(QMainWindow):
         logger.info("关闭终端会话: slot=%d, backend_alive=%s, 槽位=%s",
                      slot_idx, is_alive,
                      ["空" if s is None else "占" for s in self._slots])
+        # 断开 process_exited 信号，防止 stop() 让后端线程退出后跨线程信号被排队投递，
+        # 导致 _remove_terminal 被重复调用（第二次进来 slot 已经是 None，只打警告）。
+        # 每个 backend 只有一条连接（_add_terminal 里的 lambda），断掉不影响其他终端。
+        try:
+            slot.backend.process_exited.disconnect()
+        except Exception:
+            pass
         slot.backend.stop()
         self._grid.removeWidget(slot.tile)
         slot.tile.deleteLater()

@@ -37,22 +37,28 @@ class TerminalBackend(QThread):
         self.start()
 
     def run(self):
-        logger.debug("终端读取循环开始, pid=%s", getattr(self._process, 'pid', '?'))
+        # 取局部引用：stop() 里可能把 self._process 置 None，
+        # 用局部变量避免 finally 里访问已失效的实例属性。
+        process = self._process
+        pid = getattr(process, 'pid', '?') if process else '?'
+        logger.debug("终端读取循环开始, pid=%s", pid)
         try:
-            while self._process.isalive():
-                data = self._process.read(4096)
+            while process and process.isalive():
+                data = process.read(4096)
                 if data:
                     self.data_received.emit(data)
         except EOFError:
-            logger.debug("终端 EOF, pid=%s", getattr(self._process, 'pid', '?'))
+            logger.debug("终端 EOF, pid=%s", pid)
         except Exception:
-            logger.exception("终端读取循环异常, pid=%s", getattr(self._process, 'pid', '?'))
+            logger.exception("终端读取循环异常, pid=%s", pid)
         finally:
             exit_code = 0
-            if self._process:
-                exit_code = self._process.wait()
-            logger.info("终端进程退出, pid=%s exit_code=%d",
-                         getattr(self._process, 'pid', '?'), exit_code)
+            if process:
+                try:
+                    exit_code = process.wait()
+                except Exception:
+                    logger.debug("进程 wait() 异常, pid=%s (已忽略)", pid)
+            logger.info("终端进程退出, pid=%s exit_code=%d", pid, exit_code)
             self.process_exited.emit(exit_code)
 
     def write(self, text):
@@ -81,3 +87,6 @@ class TerminalBackend(QThread):
                 logger.error("terminate 后线程仍未退出, pid=%s (放弃, 可能资源泄漏)", pid)
             else:
                 logger.info("终端线程已强制终止, pid=%s", pid)
+                # 防御性修复：强制终止成功后把 _process 置 None，
+                # 避免 write()/resize() 等方法访问已无效的进程对象
+                self._process = None
