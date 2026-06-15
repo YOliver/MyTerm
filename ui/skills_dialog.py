@@ -246,12 +246,7 @@ class SkillsDialog(QDialog):
                 lambda _checked, btn=name_btn, n=skill.name: self._select_skill(btn, n)
             )
 
-            desc_label = QLabel(f"  {skill.description}", row_widget)
-            desc_label.setWordWrap(True)
-            desc_label.setStyleSheet("QLabel { color: #888; font-size: 11px; }")
-
             row_layout.addWidget(name_btn)
-            row_layout.addWidget(desc_label)
             self._skill_layout.addWidget(row_widget)
 
         self._skill_layout.addStretch()
