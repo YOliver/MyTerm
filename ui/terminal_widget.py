@@ -374,21 +374,25 @@ class TerminalWidget(QWidget):
     def _scroll_by(self, lines: int) -> None:
         """正数减小 offset（看更新），负数增大 offset（看更旧）。语义与 wheelEvent 一致。"""
         history_len = len(self._screen.history.top)
-        new_offset = clamp_scroll_offset(self._scroll_offset - lines, history_len)
-        if new_offset != self._scroll_offset:
+        old_offset = self._scroll_offset
+        new_offset = clamp_scroll_offset(old_offset - lines, history_len)
+        if new_offset != old_offset:
             self._scroll_offset = new_offset
+            logger.debug("滚动: offset %d -> %d (lines=%d)", old_offset, new_offset, lines)
             self.update()
             self.scroll_state_changed.emit()
 
     def _scroll_to_top(self) -> None:
         history_len = len(self._screen.history.top)
         if self._scroll_offset != history_len:
+            logger.debug("滚动到顶部: offset %d -> %d", self._scroll_offset, history_len)
             self._scroll_offset = history_len
             self.update()
             self.scroll_state_changed.emit()
 
     def _scroll_to_bottom(self) -> None:
         if self._scroll_offset != 0:
+            logger.debug("滚动到底部: offset %d -> 0", self._scroll_offset)
             self._scroll_offset = 0
             self.update()
             self.scroll_state_changed.emit()
@@ -670,6 +674,7 @@ class TerminalWidget(QWidget):
         text = self._get_selected_text()
         if text:
             QApplication.clipboard().setText(text)
+            logger.info("已复制选区到剪贴板: 长度=%d", len(text))
         self._clear_selection()
 
     def _paste_from_clipboard(self):
@@ -686,10 +691,12 @@ class TerminalWidget(QWidget):
             if not image.isNull():
                 path = save_clipboard_image(image, _PASTE_CACHE_DIR)
                 if path:
+                    logger.info("粘贴图片: path=%s", path)
                     self._backend.write(format_path_for_pty(path))
                     return
         text = clipboard.text()
         if text:
+            logger.info("粘贴文本: 长度=%d", len(text))
             self._backend.write(text)
 
     @property

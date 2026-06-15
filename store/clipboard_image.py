@@ -51,6 +51,7 @@ def save_clipboard_image(
     if not image.save(abs_path, "PNG"):
         logger.warning("图片保存失败: %s", abs_path)
         return None
+    logger.info("图片已保存: %s", abs_path)
     return abs_path
 
 
