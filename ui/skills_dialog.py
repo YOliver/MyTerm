@@ -242,7 +242,7 @@ class SkillsDialog(QDialog):
             row_layout.setSpacing(4)
 
             # 更新图标按钮
-            icon_btn = QPushButton("↑", row_widget)
+            icon_btn = QPushButton("↻", row_widget)
             icon_btn.setFixedWidth(24)
             icon_btn.setFlat(True)
             if skill.is_git:
