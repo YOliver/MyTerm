@@ -202,75 +202,33 @@ def test_disabled_dir_naming():
     assert _disabled_dir(Path("/home/user/.claude/skills")) == Path("/home/user/.claude/skills-disabled")
 
 
-# ── _is_git_repo ──
+# ── _is_git_repo（纯文件检查）──
 
-def test_is_git_repo_true(tmp_path: Path, monkeypatch):
-    """模拟 git rev-parse 返回 0（是 git 仓库）。"""
-    from store.skills_manager import _is_git_repo
-
+def test_is_git_repo_has_dot_git_dir(tmp_path: Path):
+    """skill 目录下有 .git 子目录 → True。"""
     (tmp_path / ".git").mkdir()
-    import subprocess as _sp
-
-    class FakeResult:
-        returncode = 0
-
-    def fake_run(*args, **kwargs):
-        return FakeResult()
-
-    monkeypatch.setattr(_sp, "run", fake_run)
+    from store.skills_manager import _is_git_repo
     assert _is_git_repo(tmp_path) is True
 
 
-def test_is_git_repo_false(tmp_path: Path, monkeypatch):
-    """模拟 git rev-parse 返回非 0（不是 git 仓库）。"""
+def test_is_git_repo_no_dot_git(tmp_path: Path):
+    """无 .git 目录 → False。"""
     from store.skills_manager import _is_git_repo
-
-    (tmp_path / ".git").mkdir()
-    import subprocess as _sp
-
-    class FakeResult:
-        returncode = 1
-
-    def fake_run(*args, **kwargs):
-        return FakeResult()
-
-    monkeypatch.setattr(_sp, "run", fake_run)
     assert _is_git_repo(tmp_path) is False
 
 
-def test_is_git_repo_no_git(tmp_path: Path, monkeypatch):
-    """模拟 git 命令不存在（FileNotFoundError）。"""
+def test_is_git_repo_dot_git_is_file(tmp_path: Path):
+    """.git 是文件（worktree）→ False（不覆盖此场景）。"""
+    (tmp_path / ".git").write_text("gitdir: /some/where/.git/worktrees/foo")
     from store.skills_manager import _is_git_repo
-
-    (tmp_path / ".git").mkdir()
-    import subprocess as _sp
-
-    def fake_run(*args, **kwargs):
-        raise FileNotFoundError("git")
-
-    monkeypatch.setattr(_sp, "run", fake_run)
-    assert _is_git_repo(tmp_path) is False
-
-
-def test_is_git_repo_timeout(tmp_path: Path, monkeypatch):
-    """模拟 git 命令超时。"""
-    from store.skills_manager import _is_git_repo
-
-    (tmp_path / ".git").mkdir()
-    import subprocess as _sp
-
-    def fake_run(*args, **kwargs):
-        raise _sp.TimeoutExpired(cmd="git", timeout=5)
-
-    monkeypatch.setattr(_sp, "run", fake_run)
     assert _is_git_repo(tmp_path) is False
 
 
 # ── scan_skills git 检测 ──
 
 def test_scan_skills_detects_git(tmp_path: Path, monkeypatch):
-    """有 git 时 is_git=True，无 git 时 is_git=False。"""
-    import subprocess as _sp
+    """有 .git 时 is_git=True，无 .git 时 is_git=False。"""
+    from store.skills_manager import CLI_SKILLS_DIRS
 
     monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
 
@@ -285,14 +243,6 @@ def test_scan_skills_detects_git(tmp_path: Path, monkeypatch):
     (tmp_path / "skill-b" / "SKILL.md").write_text(
         "---\nname: B\ndescription: Skill B\n---\n", encoding="utf-8",
     )
-
-    class FakeResult:
-        returncode = 0
-
-    def fake_run(*args, **kwargs):
-        return FakeResult()
-
-    monkeypatch.setattr(_sp, "run", fake_run)
 
     results = scan_skills("test_cli")
     assert len(results) == 2
