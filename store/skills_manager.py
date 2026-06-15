@@ -145,11 +145,13 @@ def scan_skills(cli_id: str) -> list[SkillInfo]:
                 continue
             md_path = entry / "SKILL.md"
             name, description = _parse_skill_md(md_path)
+            is_git = _is_git_repo(entry)
             results.append(SkillInfo(
                 name=name,
                 description=description,
                 enabled=enabled,
                 cli_id=cli_id,
+                is_git=is_git,
             ))
 
     # 按 name 字典序排列

@@ -258,3 +258,41 @@ def test_is_git_repo_timeout(tmp_path: Path, monkeypatch):
 
     monkeypatch.setattr(_sp, "run", fake_run)
     assert _is_git_repo(tmp_path) is False
+
+
+# ── scan_skills git 检测 ──
+
+def test_scan_skills_detects_git(tmp_path: Path, monkeypatch):
+    """有 git 时 is_git=True，无 git 时 is_git=False。"""
+    import subprocess as _sp
+
+    monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
+
+    # skill-a 有 git
+    (tmp_path / "skill-a").mkdir()
+    (tmp_path / "skill-a" / "SKILL.md").write_text(
+        "---\nname: A\ndescription: Skill A\n---\n", encoding="utf-8",
+    )
+    # skill-b 无 git
+    (tmp_path / "skill-b").mkdir()
+    (tmp_path / "skill-b" / "SKILL.md").write_text(
+        "---\nname: B\ndescription: Skill B\n---\n", encoding="utf-8",
+    )
+
+    call_count = [0]
+
+    def fake_run(*args, **kwargs):
+        call_count[0] += 1
+        class R:
+            pass
+        # 第一个调用（skill-a）返回 0，第二个（skill-b）返回 1
+        r = R()
+        r.returncode = 0 if call_count[0] == 1 else 1
+        return r
+
+    monkeypatch.setattr(_sp, "run", fake_run)
+
+    results = scan_skills("test_cli")
+    assert len(results) == 2
+    assert results[0].is_git is True
+    assert results[1].is_git is False
