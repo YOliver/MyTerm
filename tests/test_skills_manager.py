@@ -206,9 +206,9 @@ def test_disabled_dir_naming():
 
 def test_is_git_repo_true(tmp_path: Path, monkeypatch):
     """模拟 git rev-parse 返回 0（是 git 仓库）。"""
-    from store.skills_manager import _is_git_repo, CLI_SKILLS_DIRS
+    from store.skills_manager import _is_git_repo
 
-    monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
+    (tmp_path / ".git").mkdir()
     import subprocess as _sp
 
     class FakeResult:
@@ -224,6 +224,8 @@ def test_is_git_repo_true(tmp_path: Path, monkeypatch):
 def test_is_git_repo_false(tmp_path: Path, monkeypatch):
     """模拟 git rev-parse 返回非 0（不是 git 仓库）。"""
     from store.skills_manager import _is_git_repo
+
+    (tmp_path / ".git").mkdir()
     import subprocess as _sp
 
     class FakeResult:
@@ -239,6 +241,8 @@ def test_is_git_repo_false(tmp_path: Path, monkeypatch):
 def test_is_git_repo_no_git(tmp_path: Path, monkeypatch):
     """模拟 git 命令不存在（FileNotFoundError）。"""
     from store.skills_manager import _is_git_repo
+
+    (tmp_path / ".git").mkdir()
     import subprocess as _sp
 
     def fake_run(*args, **kwargs):
@@ -251,6 +255,8 @@ def test_is_git_repo_no_git(tmp_path: Path, monkeypatch):
 def test_is_git_repo_timeout(tmp_path: Path, monkeypatch):
     """模拟 git 命令超时。"""
     from store.skills_manager import _is_git_repo
+
+    (tmp_path / ".git").mkdir()
     import subprocess as _sp
 
     def fake_run(*args, **kwargs):
@@ -268,8 +274,9 @@ def test_scan_skills_detects_git(tmp_path: Path, monkeypatch):
 
     monkeypatch.setitem(CLI_SKILLS_DIRS, "test_cli", tmp_path)
 
-    # skill-a 有 git
+    # skill-a 有 git（含 .git 目录）
     (tmp_path / "skill-a").mkdir()
+    (tmp_path / "skill-a" / ".git").mkdir()
     (tmp_path / "skill-a" / "SKILL.md").write_text(
         "---\nname: A\ndescription: Skill A\n---\n", encoding="utf-8",
     )
@@ -279,16 +286,11 @@ def test_scan_skills_detects_git(tmp_path: Path, monkeypatch):
         "---\nname: B\ndescription: Skill B\n---\n", encoding="utf-8",
     )
 
-    call_count = [0]
+    class FakeResult:
+        returncode = 0
 
     def fake_run(*args, **kwargs):
-        call_count[0] += 1
-        class R:
-            pass
-        # 第一个调用（skill-a）返回 0，第二个（skill-b）返回 1
-        r = R()
-        r.returncode = 0 if call_count[0] == 1 else 1
-        return r
+        return FakeResult()
 
     monkeypatch.setattr(_sp, "run", fake_run)
 

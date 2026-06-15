@@ -56,7 +56,14 @@ def _disabled_dir(skills_root: Path) -> Path:
 
 
 def _is_git_repo(path: Path) -> bool:
-    """通过 git rev-parse 判断目录是否在 git 仓库中。"""
+    """通过 .git 目录/文件 + git rev-parse 判断目录是否为 git 仓库。
+
+    先做 O(1) 的文件检查避免对每个 skill 都启动子进程。
+    仅当 .git（目录或 worktree 文件）存在时才调用 git 命令确认。
+    """
+    git_path = path / ".git"
+    if not git_path.exists():
+        return False
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--is-inside-work-tree"],
