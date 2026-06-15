@@ -75,7 +75,6 @@ def compute_grid_shape_for(n: int, mode: LayoutMode) -> tuple[int, int]:
 新增后：`视图 | 环境 | 设置 | Skills | 日志 | 帮助`
 
 ```python
-# 在 _build_menubar 中新增
 view_menu = menubar.addMenu("视图")
 
 self._layout_actions: dict[LayoutMode, QAction] = {}
@@ -87,7 +86,9 @@ for mode, label in [
 ]:
     action = view_menu.addAction(label)
     action.setCheckable(True)
-    action.triggered.connect(self._make_layout_switch_handler(mode))
+    action.triggered.connect(
+        lambda _checked, m=mode: self._on_layout_switch(m)
+    )
     self._layout_actions[mode] = action
 
 self._update_layout_menu_check()
@@ -138,16 +139,15 @@ def _relayout(self) -> None:
 | 边框 | `1px solid #333` |
 | 圆角 | `2px` |
 
-**布局切换闭包：**
+**布局切换处理：**
 
 ```python
-def _make_layout_switch_handler(self, mode: LayoutMode):
-    def handler(_checked: bool | None = None) -> None:
-        self._config.layout_mode = mode
-        self._config.save()
-        self._update_layout_menu_check()
-        self._relayout()
-    return handler
+def _on_layout_switch(self, mode: LayoutMode) -> None:
+    """视图菜单切换布局模式。"""
+    self._config.layout_mode = mode
+    self._config.save()
+    self._update_layout_menu_check()
+    self._relayout()
 ```
 
 **菜单选中状态同步：**
