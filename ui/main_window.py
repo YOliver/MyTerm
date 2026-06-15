@@ -330,13 +330,11 @@ class MainWindow(QMainWindow):
         return sum(1 for s in self._slots if s is not None)
 
     def _relayout(self) -> None:
-        # 1) 移除旧 widgets（包括占位符）
+        # 1) 移除旧 widgets（tile 只 remove 不 delete，占位符在下文统一清理）
         for i in reversed(range(self._grid.count())):
             item = self._grid.itemAt(i)
             if item and item.widget():
-                w = item.widget()
-                self._grid.removeWidget(w)
-                w.deleteLater()
+                self._grid.removeWidget(item.widget())
 
         # 2) 收集非空 tile
         tiles = [s for s in self._slots if s is not None]
@@ -364,7 +362,12 @@ class MainWindow(QMainWindow):
         for i, slot in enumerate(tiles):
             self._grid.addWidget(slot.tile, i // cols, i % cols)
 
-        # 7) 固定模式下填占位符
+        # 7) 固定模式下填占位符（先清旧再建新）
+        if hasattr(self, '_placeholders'):
+            for p in self._placeholders:
+                p.deleteLater()
+        self._placeholders = []
+
         if self._config.layout_mode != LayoutMode.AUTO:
             for i in range(count, total_cells):
                 placeholder = QWidget()
@@ -372,6 +375,7 @@ class MainWindow(QMainWindow):
                     "background: #1a1a1a; border: 1px solid #333; border-radius: 2px;"
                 )
                 self._grid.addWidget(placeholder, i // cols, i % cols)
+                self._placeholders.append(placeholder)
 
     def _on_layout_switch(self, mode) -> None:
         """视图菜单切换布局模式。"""
