@@ -150,7 +150,7 @@ python -m PyInstaller myterm.spec
 只用现成 EXE 重新打安装包：
 
 ```bat
-"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.2.2 installer\myterm.iss
+"C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAppVersion=0.3.1 installer\myterm.iss
 ```
 
 清理后重来：
