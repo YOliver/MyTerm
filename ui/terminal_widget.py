@@ -305,6 +305,7 @@ class TerminalWidget(QWidget):
                 line = self._screen.buffer.get(idx - history_len, {})
             rows.append((idx, y, line))
 
+        # 第一遍：背景层
         for idx, y, line in rows:
             col = 0
             while col < self._screen.columns:
@@ -315,31 +316,42 @@ class TerminalWidget(QWidget):
                 has_real_char = bool(char and char.data and char.data != " ")
                 is_reverse_space = bool(char and char.reverse and not has_real_char)
 
-                # ---- 背景 ----
                 if has_real_char or is_reverse_space:
                     w = cell_width(char.data) if has_real_char else 1
-                    px_width = self._char_width * w
+                else:
+                    w = 1
+                px_width = self._char_width * w
+
+                if has_real_char or is_reverse_space:
                     bg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
                     if char.reverse:
                         fg_check = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
                         bg = fg_check
                     if self._in_selection(idx, col):
                         bg = SEL_COLOR
-                    painter.fillRect(x, y, px_width, self._char_height, bg)
                 else:
-                    w = 1
-                    px_width = self._char_width
                     bg = SEL_COLOR if self._in_selection(idx, col) else DEFAULT_BG
-                    painter.fillRect(x, y, px_width, self._char_height, bg)
 
-                # ---- 前景文字 ----
+                painter.fillRect(x, y, px_width, self._char_height, bg)
+                col += w
+
+        # 第二遍：文字层
+        for idx, y, line in rows:
+            col = 0
+            while col < self._screen.columns:
+                x = col * self._char_width
+                if x > self.width():
+                    break
+                char = line.get(col)
+                has_real_char = bool(char and char.data and char.data != " ")
                 if has_real_char:
+                    w = cell_width(char.data)
+                    px_width = self._char_width * w
+
                     fg = self._to_qcolor(char.fg) if char.fg != "default" else DEFAULT_FG
                     bg_for_fg = self._to_qcolor(char.bg) if char.bg != "default" else DEFAULT_BG
                     if char.reverse:
                         fg, bg_for_fg = bg_for_fg, fg
-                    # 注意：原版第二遍里 selection 只改 bg（死代码），不改 fg，
-                    # 所以选中区文字色保持原 fg（或 reverse 后的 fg），与背景独立。
                     painter.setPen(fg)
                     if char.bold and char.italics:
                         painter.setFont(self._font_bi)
@@ -353,7 +365,8 @@ class TerminalWidget(QWidget):
                     if char.underscore:
                         painter.drawLine(x, y + self._char_height - 1,
                                          x + px_width, y + self._char_height - 1)
-
+                else:
+                    w = 1
                 col += w
 
         if self._cursor_visible and self._scroll_offset == 0 and not self._screen.cursor.hidden:
