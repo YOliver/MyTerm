@@ -1,4 +1,5 @@
 import logging
+import time
 
 from PySide6.QtCore import QThread, Signal
 from winpty import PtyProcess
@@ -23,7 +24,8 @@ class TerminalBackend(QThread):
         self._rows = rows
         if cmdline is None:
             cmdline = ["powershell.exe"]
-        logger.info("启动终端: cmd=%s cwd=%s size=%dx%d", cmdline, cwd, columns, rows)
+        logger.info("准备 PtyProcess.spawn: cmd=%s cwd=%s size=%dx%d", cmdline, cwd, rows, columns)
+        spawn_t0 = time.perf_counter()
         try:
             self._process = PtyProcess.spawn(
                 cmdline,
@@ -31,10 +33,14 @@ class TerminalBackend(QThread):
                 dimensions=(rows, columns),
             )
         except Exception:
-            logger.exception("PtyProcess.spawn 失败: cmd=%s cwd=%s", cmdline, cwd)
+            spawn_ms = (time.perf_counter() - spawn_t0) * 1000
+            logger.exception("PtyProcess.spawn 失败，耗时 %.1fms: cmd=%s cwd=%s", spawn_ms, cmdline, cwd)
             raise
-        logger.debug("PtyProcess.spawn 成功, pid=%s", getattr(self._process, 'pid', '?'))
+        spawn_ms = (time.perf_counter() - spawn_t0) * 1000
+        logger.info("PtyProcess.spawn 完成，耗时 %.1fms，pid=%s",
+                    spawn_ms, getattr(self._process, 'pid', '?'))
         self.start()
+        logger.info("QThread.start() 已调用")
 
     def run(self):
         # 取局部引用：stop() 里可能把 self._process 置 None，

@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 from collections import namedtuple
 
 from PySide6.QtCore import Qt
@@ -153,65 +154,94 @@ class MainWindow(QMainWindow):
         self.setStyleSheet("QMainWindow { background: #1e1e1e; }")
 
     def _on_launch(self):
+        t0 = time.perf_counter()
         path = self._path_combo.currentText().strip()
         if not path:
+            logger.info("_on_launch [%.1fms] 未选择路径，取消", 0.0)
             QMessageBox.warning(self, "提示", "请先选择一个路径")
             return
         if not os.path.isdir(path):
-            logger.warning("启动路径不存在: %s", path)
+            t1 = (time.perf_counter() - t0) * 1000
+            logger.warning("_on_launch [%.1fms] 启动路径不存在: %s", t1, path)
             QMessageBox.warning(self, "错误", f"路径不存在:\n{path}")
             return
 
         combo_idx = self._shell_combo.currentIndex()
         presets = self._config.shell_presets
-        logger.info("用户启动终端: path=%s combo_idx=%d presets_len=%d", path, combo_idx, len(presets))
         if combo_idx < 0 or combo_idx >= len(presets):
-            logger.error("shell_combo 索引越界: idx=%d, presets=%d", combo_idx, len(presets))
+            t1 = (time.perf_counter() - t0) * 1000
+            logger.error("_on_launch [%.1fms] shell_combo 索引越界: idx=%d, presets=%d",
+                         t1, combo_idx, len(presets))
             QMessageBox.warning(self, "错误", "Shell 预设索引异常，请重新选择")
             return
         preset = presets[combo_idx]
-        logger.info("选中预设: label=%s host=%s cmd=%s", preset.label, preset.host, preset.raw_command)
-        # 每步都打 INFO 级时间戳：休眠唤醒后曾出现 _on_launch 进入但后续静默无日志、
-        # UI 卡死的现象（见 myterm.log 2026-06-03 10:56:58）。细化日志才能定位卡点。
-        logger.info("_on_launch: 写入路径历史 path=%s", path)
+        t1 = (time.perf_counter() - t0) * 1000
+        logger.info("_on_launch [%.1fms] 预设读取完成: label=%s cmd=%s", t1, preset.label, preset.raw_command)
+
         self._history.add(path)
-        logger.info("_on_launch: 刷新路径下拉框")
+        t2 = (time.perf_counter() - t0) * 1000
+        logger.info("_on_launch [%.1fms] 路径历史已写入 path=%s", t2, path)
+
         self._load_history()
+        t3 = (time.perf_counter() - t0) * 1000
+        logger.info("_on_launch [%.1fms] 下拉框已刷新", t3)
+
         cmdline = list(preset.command)
-        logger.info("_on_launch: 进入 _add_terminal cmd=%s", cmdline)
+        t4 = (time.perf_counter() - t0) * 1000
+        logger.info("_on_launch [%.1fms] 校验通过，进入 _add_terminal cmd=%s", t4, cmdline)
         self._add_terminal(path, cmdline)
-        logger.info("_on_launch: 完成")
+        t5 = (time.perf_counter() - t0) * 1000
+        logger.info("_on_launch [%.1fms] 完成", t5)
 
     def _add_terminal(self, path, cmdline=None):
+        t0 = time.perf_counter()
         idx = self._find_empty_slot()
         if idx is None:
-            logger.warning("终端槽位已满 (max=%d)", self._config.max_terminals)
+            logger.warning("_add_terminal [%.1fms] 终端槽位已满 (max=%d)",
+                           (time.perf_counter() - t0) * 1000, self._config.max_terminals)
             QMessageBox.warning(self, "提示", f"已达到最大数量 {self._config.max_terminals}")
             return
 
-        logger.info("创建终端会话: slot=%d path=%s cmd=%s (已用=%d/%d)",
-                     idx, path, cmdline, self._active_count(), self._config.max_terminals)
-        # 拆解每个子步骤的日志：start_shell 内部走 PtyProcess.spawn，
-        # 是历史上最容易因系统资源（PTY 句柄、ConPTY）卡住的位置。
-        logger.debug("_add_terminal: 构造 backend")
+        active = self._active_count()
+        t1 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] 空槽位 idx=%d (已用=%d/%d) cmd=%s",
+                    t1, idx, active, self._config.max_terminals, cmdline)
+
         backend = TerminalBackend()
-        logger.debug("_add_terminal: 构造 TerminalWidget")
+        t2 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] TerminalBackend 构造完成", t2)
+
         terminal = TerminalWidget(backend)
-        logger.debug("_add_terminal: 调用 start_shell")
+        t3 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] TerminalWidget 构造完成", t3)
+
+        start_shell_t0 = time.perf_counter()
         backend.start_shell(cwd=path, columns=terminal.columns,
                             rows=terminal.rows, cmdline=cmdline)
-        logger.debug("_add_terminal: start_shell 返回, 连接 process_exited")
-        # 进程退出时自动释放槽位，防止僵尸槽位堆积
+        spawn_ms = (time.perf_counter() - start_shell_t0) * 1000
+        t4 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] backend.start_shell() 返回，耗时 %.1fms", t4, spawn_ms)
+
         backend.process_exited.connect(lambda _code, i=idx: self._remove_terminal(i))
+        t5 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] process_exited 信号已连接", t5)
 
         shell_label = self._config.shell_presets[self._shell_combo.currentIndex()].label
         tile = self._make_tile(path, terminal, idx, shell_label)
+        t6 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] _make_tile 完成", t6)
+
         self._slots[idx] = Slot(backend, terminal, tile)
-        logger.debug("终端已加入 slot=%d, 槽位=%s",
-                      idx, ["空" if s is None else "占" for s in self._slots])
+        t7 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] Slot 已注册 slot=%d", t7, idx)
 
         self._relayout()
+        t8 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] _relayout 完成", t8)
+
         terminal.setFocus()
+        t9 = (time.perf_counter() - t0) * 1000
+        logger.info("_add_terminal [%.1fms] setFocus 完成，终端会话创建完成 slot=%d", t9, idx)
 
     def _make_tile(self, path, terminal, slot_idx, shell_label=""):
         tile = QWidget()
@@ -345,6 +375,11 @@ class MainWindow(QMainWindow):
         # 3) 根据布局模式计算行列
         rows, cols = compute_grid_shape_for(count, self._config.layout_mode)
         total_cells = rows * cols
+
+        if logger.isEnabledFor(logging.INFO):
+            active = self._active_count()
+            logger.info("_relayout: count=%d mode=%s grid=%dx%d total=%d (active=%d)",
+                        count, self._config.layout_mode, rows, cols, total_cells, active)
 
         # 4) 清掉所有旧 stretch
         for r in range(self._grid.rowCount()):

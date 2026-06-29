@@ -201,6 +201,14 @@ class TerminalWidget(QWidget):
         self._cursor_timer.timeout.connect(self._blink_cursor)
         self._cursor_timer.start(530)
 
+        logger.info(
+            "TerminalWidget 初始化完成: screen=%dx%d history=%d font=%s pt=%d char_wh=%dx%d",
+            self._screen.columns, self._screen.lines,
+            len(self._screen.history.top),
+            self._font.family(), self._font.pointSize(),
+            self._char_width, self._char_height,
+        )
+
     def _apply_resize(self):
         cols = max(10, self.width() // self._char_width)
         rows = max(5, self.height() // self._char_height)
