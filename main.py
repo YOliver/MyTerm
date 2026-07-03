@@ -5,6 +5,7 @@ from PySide6.QtWidgets import QApplication
 from PySide6.QtGui import QIcon
 from store.paths import migrate_legacy_files, resource_path
 from store.log import setup_logging
+from store.watchdog import MainThreadWatchdog
 from ui.main_window import MainWindow
 from version import __version__
 
@@ -30,6 +31,11 @@ def main():
         app.setWindowIcon(QIcon(ICON_PATH))
     window = MainWindow()
     window.show()
+
+    # 主线程看门狗：UI 卡死 >=3s 时把主线程调用栈写入日志，用于定位卡死点。
+    watchdog = MainThreadWatchdog(timeout=3.0, check_interval=1.0)
+    watchdog.start(parent=window)
+
     rc = app.exec()
     logger.info("MyTerm 退出, code=%d", rc)
     sys.exit(rc)
