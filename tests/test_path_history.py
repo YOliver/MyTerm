@@ -1,8 +1,5 @@
-import json
-import os
 from unittest.mock import patch
 
-import pytest
 from store.path_history import PathHistory
 
 
@@ -48,41 +45,27 @@ def test_persist_and_load(tmp_path):
     assert history_b.all() == ["C:\\test"]
 
 
-# ---------------------- 原子写入 ----------------------
+# ---------------------- 写入 ----------------------
 
-def test_save_is_atomic_no_tmp_left(tmp_path):
-    """正常保存后 .tmp 文件不残留。"""
+def test_save_writes_directly_no_tmp(tmp_path):
+    """直接写入正式文件，不产生 .tmp 残留。"""
     fp = str(tmp_path / "paths.json")
     history = PathHistory(filepath=fp)
     history.add("C:\\a")
-    leftovers = list(tmp_path.glob("*.tmp"))
-    assert leftovers == []
+    assert list(tmp_path.glob("*.tmp")) == []
+    assert (tmp_path / "paths.json").exists()
 
 
-def test_save_atomic_preserves_old_on_replace_failure(tmp_path):
-    """os.replace 失败时，原文件内容不丢失。"""
-    fp = str(tmp_path / "paths.json")
-    history = PathHistory(filepath=fp)
-    history.add("C:\\original")
-    original_content = (tmp_path / "paths.json").read_text(encoding="utf-8")
-
-    with patch("store.path_history.os.replace", side_effect=OSError("模拟失败")):
-        history.add("C:\\new")
-
-    # 原文件内容应保持不变
-    assert (tmp_path / "paths.json").read_text(encoding="utf-8") == original_content
-
-
-def test_save_atomic_cleans_tmp_on_failure(tmp_path):
-    """os.replace 失败后 .tmp 文件应被清理。"""
+def test_save_swallows_oserror(tmp_path):
+    """写入失败（OSError）时不抛异常、不崩溃，内存状态仍更新。"""
     fp = str(tmp_path / "paths.json")
     history = PathHistory(filepath=fp)
 
-    with patch("store.path_history.os.replace", side_effect=OSError("模拟失败")):
-        history.add("C:\\a")
+    with patch("store.path_history.json.dump", side_effect=OSError("模拟失败")):
+        history.add("C:\\a")  # 不应抛出
 
-    leftovers = list(tmp_path.glob("*.tmp"))
-    assert leftovers == []
+    # 落盘失败不影响内存中的历史
+    assert history.all() == ["C:\\a"]
 
 
 def test_load_survives_truncated_file(tmp_path):

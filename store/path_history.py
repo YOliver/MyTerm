@@ -34,19 +34,16 @@ class PathHistory:
             return []
 
     def _save(self):
-        logger.debug("路径历史保存: file=%s 条目=%d paths=%s",
-                      self._filepath, len(self._paths), self._paths)
-        tmp_path = self._filepath + ".tmp"
+        # 直接覆盖写入。路径历史是低价值数据（丢失只需用户重新选路径），
+        # 不采用 tmp+os.replace 原子写：避免在 AppData 下频繁新建 .tmp 文件，
+        # 减少被杀毒实时扫描拦截、阻塞写入而冻结 UI 的诱因。
+        logger.debug("路径历史保存: file=%s 条目=%d",
+                      self._filepath, len(self._paths))
         try:
-            with open(tmp_path, "w", encoding="utf-8") as f:
+            with open(self._filepath, "w", encoding="utf-8") as f:
                 json.dump(self._paths, f, ensure_ascii=False)
-            os.replace(tmp_path, self._filepath)
         except OSError:
             logger.exception("路径历史保存失败: %s", self._filepath)
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
 
     def add(self, path):
         path = os.path.normpath(path)
