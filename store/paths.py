@@ -180,3 +180,13 @@ def migrate_legacy_files() -> None:
         sentinel.write_text("", encoding="utf-8")
     except OSError as e:
         print(f"[paths] 哨兵写入失败 {sentinel}: {e}", file=sys.stderr)
+
+
+def database_path() -> Path:
+    """myterm.db 全路径。打包模式：%LOCALAPPDATA%/MyTerm/myterm.db，开发模式：工程根下 myterm.db。"""
+    return local_data_dir() / "myterm.db"
+
+
+def config_json_path() -> Path:
+    """config.json 全路径（与 AppConfig 当前使用路径一致，供迁移阶段读取）。"""
+    return local_data_dir() / "config.json"
