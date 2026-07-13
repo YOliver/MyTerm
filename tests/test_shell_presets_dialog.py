@@ -34,17 +34,9 @@ def test_dialog_disables_delete_for_readonly_row(qapp):
 
 
 def test_dialog_keeps_readonly_and_installer_id_when_saving(qapp, monkeypatch):
-    """保存时把行级 readonly/installer_id 元数据写回，不会因为 dialog 走一遭就丢字段。"""
+    """保存时 presets_changed 信号携带完整的 readonly/installer_id 元数据。"""
     from ui import shell_presets_dialog as dlg_module
     from ui.shell_presets_dialog import ShellPresetsDialog
-
-    saved_payload: list[list[ShellPreset]] = []
-
-    def fake_save(presets, path=None):
-        saved_payload.append(list(presets))
-
-    # 拦截真正的 save，避免动 %LOCALAPPDATA%
-    monkeypatch.setattr(dlg_module.shell_presets, "save", fake_save)
 
     initial = [
         ShellPreset("powershell", "none", "powershell.exe", readonly=True),
@@ -57,15 +49,14 @@ def test_dialog_keeps_readonly_and_installer_id_when_saving(qapp, monkeypatch):
     try:
         dlg._on_save()
 
-        assert len(saved_payload) == 1
-        out = saved_payload[0]
+        # presets_changed 信号携带完整元数据
+        assert len(received) == 1
+        out = received[0]
         by_label = {p.label: p for p in out}
         assert by_label["powershell"].readonly is True
         assert by_label["Claude Code"].installer_id == "claude_code"
         assert by_label["custom"].readonly is False
         assert by_label["custom"].installer_id is None
-        # presets_changed 信号也要 emit
-        assert len(received) == 1
     finally:
         dlg.close()
 

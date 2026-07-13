@@ -140,11 +140,13 @@ class CliInstallDialog(QDialog):
         self,
         parent=None,
         specs: list[InstallerSpec] | None = None,
+        store=None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("CLI 安装")
         self.resize(820, 480)
         self.setStyleSheet(_DIALOG_STYLE)
+        self._store = store  # DataStore 实例（可选，兼容旧调用）
 
         self._specs: list[InstallerSpec] = specs if specs is not None else discover()
         self._detect_worker: DetectWorker | None = None
@@ -421,7 +423,7 @@ class CliInstallDialog(QDialog):
             return
 
         try:
-            current = load_presets()
+            current = load_presets(store=self._store) if self._store else load_presets()
         except Exception as e:  # noqa: BLE001
             self._log.appendPlainText(f"[err] 读取 shell_presets 失败：{e}")
             return
@@ -443,7 +445,10 @@ class CliInstallDialog(QDialog):
             return
 
         try:
-            save_presets(new_list)
+            if self._store:
+                save_presets(new_list, store=self._store)
+            else:
+                save_presets(new_list)
         except Exception as e:  # noqa: BLE001
             self._log.appendPlainText(f"[err] 写入 shell_presets 失败：{e}")
             return

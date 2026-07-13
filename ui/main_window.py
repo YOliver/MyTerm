@@ -74,14 +74,15 @@ COMBO_STYLE = (
 
 
 class MainWindow(QMainWindow):
-    def __init__(self) -> None:
+    def __init__(self, store=None) -> None:
         super().__init__()
         self.setWindowTitle("MyTerm")
         self.resize(1100, 650)
         logger.info("主窗口初始化")
 
-        self._history = PathHistory()
-        self._config = AppConfig()
+        self._store = store  # 可能为 None（旧调用方兼容）
+        self._history = PathHistory(store) if store is not None else PathHistory()
+        self._config = AppConfig(store) if store is not None else AppConfig()
         self._slots: list[Slot | None] = [None] * self._config.max_terminals
 
         self._build_menubar()
@@ -115,8 +116,7 @@ class MainWindow(QMainWindow):
         self._shell_combo.setMinimumHeight(30)
         self._shell_combo.setStyleSheet(
             COMBO_STYLE.format("5px 8px", "4px", "6px 8px", "24px"))
-        for preset in self._config.shell_presets:
-            self._shell_combo.addItem(preset.label)
+        self._rebuild_shell_combo()
         topbar_layout.addWidget(self._shell_combo)
 
         browse_btn = QPushButton("浏览")
@@ -510,7 +510,7 @@ class MainWindow(QMainWindow):
     def _on_open_cli_install(self):
         # 延迟 import：对话框模块只在用户点开菜单时加载，启动期不付代价
         from ui.cli_install_dialog import CliInstallDialog
-        dlg = CliInstallDialog(self)
+        dlg = CliInstallDialog(self, store=self._store)
         # 安装/卸载成功后联动刷新启动下拉框；信号无参，复用 _on_presets_changed
         # 时套层 lambda，把可选参数留给原签名（ShellPresetsDialog 那边带 list）
         dlg.presets_changed.connect(lambda: self._on_presets_changed(None))
@@ -526,24 +526,32 @@ class MainWindow(QMainWindow):
         from store.paths import log_dir
         os.startfile(str(log_dir()))
 
-    def _on_presets_changed(self, _new_presets=None):
-        """设置面板保存后：重读盘 + 重填启动下拉框，按 label 回填 currentIndex。
-
-        参数 ``_new_presets`` 在 ShellPresetsDialog 的信号里是新列表；CliInstallDialog
-        触发时为 None。两种调用都直接走 reload，所以参数其实可忽略——保留只是为了
-        signature 兼容旧信号绑定。
-
-        已开终端不动：backend 已经在跑，没必要重启。
-        """
+    def _on_presets_changed(self, new_presets=None):
+        """设置面板或 CLI 安装/卸载后：保存 → 重读 → 重建下拉框。"""
+        if new_presets is not None and self._store is not None:
+            from store import shell_presets
+            shell_presets.save(new_presets, store=self._store)
         self._config.reload_shell_presets()
         logger.info("Shell 预设已刷新, 共 %d 条", len(self._config.shell_presets))
+        self._rebuild_shell_combo()
+
+    def on_data_loaded(self):
+        """DataWorker 数据加载完毕后刷新 UI。"""
+        self._load_history()
+        self._config.reload_shell_presets()
+        self._rebuild_shell_combo()
+
+    def _rebuild_shell_combo(self):
+        """重建 shell 下拉框。清空后重新填入预设；保留当前选中项。"""
         old_label = self._shell_combo.currentText()
         self._shell_combo.blockSignals(True)
         self._shell_combo.clear()
         for preset in self._config.shell_presets:
             self._shell_combo.addItem(preset.label)
-        idx = self._shell_combo.findText(old_label)
-        self._shell_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        if old_label:
+            idx = self._shell_combo.findText(old_label)
+            if idx >= 0:
+                self._shell_combo.setCurrentIndex(idx)
         self._shell_combo.blockSignals(False)
 
     def _on_help_welcome(self):

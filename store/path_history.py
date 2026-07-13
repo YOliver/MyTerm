@@ -1,20 +1,31 @@
+"""路径历史：内存操作委托给 DataStore，不再直接读写文件。
+
+当 ``store=None`` 时回退到旧版文件读写（向后兼容需要无 DataStore 的调用方）。
+"""
+from __future__ import annotations
+
 import json
 import logging
 import os
+
+from store.data_store import DataStore
 
 logger = logging.getLogger(__name__)
 
 
 class PathHistory:
-    def __init__(self, filepath=None):
-        if filepath is None:
+    """路径历史管理器。add/all 委托给 DataStore 内存缓存（新），或直接读写文件（旧）。"""
+
+    def __init__(self, store: DataStore | None = None) -> None:
+        if store is not None:
+            self._store: DataStore = store
+        else:
             from store.paths import ensure_dir, local_data_dir, path_history_path
             ensure_dir(local_data_dir())
-            filepath = str(path_history_path())
-        self._filepath = filepath
-        self._paths = self._load()
+            self._filepath = str(path_history_path())
+            self._paths = self._load()
 
-    def _load(self):
+    def _load(self) -> list[str]:
         try:
             file_size = os.path.getsize(self._filepath)
         except OSError:
@@ -33,10 +44,7 @@ class PathHistory:
                             self._filepath, file_size, e)
             return []
 
-    def _save(self):
-        # 直接覆盖写入。路径历史是低价值数据（丢失只需用户重新选路径），
-        # 不采用 tmp+os.replace 原子写：避免在 AppData 下频繁新建 .tmp 文件，
-        # 减少被杀毒实时扫描拦截、阻塞写入而冻结 UI 的诱因。
+    def _save(self) -> None:
         logger.debug("路径历史保存: file=%s 条目=%d",
                       self._filepath, len(self._paths))
         try:
@@ -45,17 +53,24 @@ class PathHistory:
         except OSError:
             logger.exception("路径历史保存失败: %s", self._filepath)
 
-    def add(self, path):
+    def add(self, path: str) -> None:
+        """添加路径到历史。有 store 时走纯内存操作，否则走旧版文件 I/O。"""
         path = os.path.normpath(path)
-        existed = path in self._paths
-        if existed:
-            self._paths.remove(path)
-        self._paths.insert(0, path)
-        if len(self._paths) > 10:
-            self._paths = self._paths[:10]
-        logger.debug("路径历史 add: path=%s existed=%s 结果=%d 条",
-                      path, existed, len(self._paths))
-        self._save()
+        if hasattr(self, '_store'):
+            self._store.add_path(path)
+        else:
+            existed = path in self._paths
+            if existed:
+                self._paths.remove(path)
+            self._paths.insert(0, path)
+            if len(self._paths) > 10:
+                self._paths = self._paths[:10]
+            logger.debug("路径历史 add: path=%s existed=%s 结果=%d 条",
+                          path, existed, len(self._paths))
+            self._save()
 
-    def all(self):
+    def all(self) -> list[str]:
+        """返回当前路径历史副本。"""
+        if hasattr(self, '_store'):
+            return self._store.get_paths()
         return list(self._paths)

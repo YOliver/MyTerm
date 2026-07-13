@@ -305,6 +305,6 @@ class ShellPresetsDialog(QDialog):
         presets = self._collect_presets()
         if presets is None:
             return
-        shell_presets.save(presets)
+        # 保存逻辑移至 MainWindow._on_presets_changed（通过信号触发）
         self.presets_changed.emit(presets)
         self.accept()

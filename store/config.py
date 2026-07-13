@@ -72,19 +72,28 @@ def compute_grid_shape_for(n: int, mode: LayoutMode) -> tuple[int, int]:
 
 
 class AppConfig:
-    """聚合槽位上限 + shell 预设入口。预设来自 ``shell_presets.json``。"""
-    _CONFIG_FILE = "config.json"
+    """应用配置入口。从 DataStore 读取，通过 DataWorker 持久化到 SQLite。"""
 
-    def __init__(self) -> None:
-        from store import paths
-        self._config_path = paths.data_dir() / self._CONFIG_FILE
-        data = self._load_json()
-        self.layout_mode: LayoutMode = LayoutMode(data.get("layout_mode", "auto"))
-        self._max_terminals = min(max(MAX_TERMINALS, 1), _HARD_MAX_TERMINALS)
-        # 延迟 import 避免 store 内部循环依赖（shell_presets 也用 store.paths）
-        from store import shell_presets
-        self._shell_presets_module = shell_presets
-        self._shell_presets = shell_presets.load()
+    def __init__(self, store=None) -> None:
+        if store is None:
+            # 兼容旧调用：直接从文件读取
+            from store import paths
+            self._config_path = paths.data_dir() / "config.json"
+            data = self._load_json()
+            self.layout_mode: LayoutMode = LayoutMode(data.get("layout_mode", "auto"))
+            self._max_terminals = min(max(MAX_TERMINALS, 1), _HARD_MAX_TERMINALS)
+            from store import shell_presets
+            self._shell_presets = shell_presets.load()
+        else:
+            from store.data_store import DataStore  # type guard
+            self._store: DataStore = store
+            mode_str = store.get_config_value("layout_mode", "auto")
+            self.layout_mode: LayoutMode = LayoutMode(mode_str)
+            max_str = store.get_config_value("max_terminals", "4")
+            self._max_terminals: int = min(max(int(max_str), 1), _HARD_MAX_TERMINALS)
+            from store import shell_presets
+            self._shell_presets: list = shell_presets.load(store=store)
+
         logger.info("配置加载完成: max_terminals=%d, layout_mode=%s, presets=%d",
                      self._max_terminals, self.layout_mode.value, len(self._shell_presets))
 
@@ -95,25 +104,35 @@ class AppConfig:
             return {}
 
     def save(self) -> None:
-        """保存可写配置项到 config.json（原子写入）。"""
+        """保存可写配置项。"""
+        if hasattr(self, '_store'):
+            self._store.set_config_value("layout_mode", self.layout_mode.value)
+            self._store.set_config_value("max_terminals", str(self._max_terminals))
+            return
+        # 旧 API：写 config.json
+        from store import paths
         data = self._load_json()
         data["layout_mode"] = self.layout_mode.value
         data["max_terminals"] = self._max_terminals
-        self._config_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = self._config_path.with_suffix(".tmp")
+        fp = paths.data_dir() / "config.json"
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        tmp = fp.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self._config_path)
+        tmp.replace(fp)
+
+    @property
+    def shell_presets(self):
+        return list(self._shell_presets)
 
     @property
     def max_terminals(self) -> int:
         return self._max_terminals
 
-    @property
-    def shell_presets(self):
-        """返回当前预设的拷贝列表。外部 mutate 不会污染内部状态。"""
-        return list(self._shell_presets)
-
     def reload_shell_presets(self) -> None:
-        """重新读盘刷新预设。设置面板保存后由信号触发。"""
-        self._shell_presets = self._shell_presets_module.load()
+        """重新加载预设数据。"""
+        from store import shell_presets
+        if hasattr(self, '_store'):
+            self._shell_presets = shell_presets.load(store=self._store)
+        else:
+            self._shell_presets = shell_presets.load()
         logger.info("预设重载完成, 共 %d 条", len(self._shell_presets))

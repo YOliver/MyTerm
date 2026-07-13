@@ -112,27 +112,41 @@ def _shell_presets_path() -> Path:
     return shell_presets_path()
 
 
-def load(path: Optional[Path] = None) -> list[ShellPreset]:
-    """读 ``shell_presets.json``。任何错误都降级到 ``default_presets()``，不抛异常。
+def load(store: DataStore = None, path: Optional[Path] = None) -> list[ShellPreset]:
+    """从 DataStore 内存缓存读取预设列表。
 
-    降级顺序：文件缺失 → 写入并返回默认；JSON 解析失败 / schema 错 → stderr 警告 +
-    返回默认（**不覆盖坏文件**，保护用户手改）；单条非法 → 跳过该条。
+    数据为空时回退到内置默认预设（如 powershell / cmd），写入 DataStore
+    （纯内存操作），由 DataWorker 定时 flush 到 SQLite。
+
+    保留 ``path`` 参数仅用于旧测试兼容（当 ``store`` 为 None 时走旧版文件路径）。
     """
-    target = path if path is not None else _shell_presets_path()
+    # 兼容旧调用：如果没有 DataStore，走旧版文件读取
+    if store is None:
+        target = path if path is not None else _shell_presets_path()
+        if not target.exists():
+            defaults = default_presets()
+            save(defaults, path=target)
+            return defaults
+        try:
+            with open(target, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning("解析失败 %s: %s；使用默认预设", target, e)
+            return default_presets()
+        return _parse_presets(data, target)
 
-    if not target.exists():
+    from store.data_store import DataStore  # type guard
+    data = store.get_shell_presets_data()
+    preset_dicts = data.get("presets", [])
+    if not preset_dicts:
         defaults = default_presets()
-        # 首次启动顺手把默认值落盘，让用户能看到结构示例方便手改
-        save(defaults, path=target)
-        return defaults
+        save(defaults, store=store)
+        return list(defaults)
+    return [_parse_one(item, i) for i, item in enumerate(preset_dicts)]
 
-    try:
-        with open(target, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError) as e:
-        logger.warning("解析失败 %s: %s；使用默认预设（坏文件保留不覆盖）", target, e)
-        return default_presets()
 
+def _parse_presets(data: dict, target: Path) -> list[ShellPreset]:
+    """从已解析的 JSON dict 中提取预设列表。共享于新旧 load 代码路径。"""
     if not isinstance(data, dict) or "presets" not in data:
         logger.warning("顶层结构不合法 %s；使用默认预设", target)
         return default_presets()
@@ -148,7 +162,6 @@ def load(path: Optional[Path] = None) -> list[ShellPreset]:
             presets.append(preset)
 
     if not presets:
-        # 全部条目非法 → 兜底默认
         return default_presets()
     logger.debug("预设加载成功: %s, 共 %d 条", target, len(presets))
     return presets
@@ -222,21 +235,29 @@ def _serialize_one(p: ShellPreset) -> dict:
     return obj
 
 
-def save(presets: list[ShellPreset], path: Optional[Path] = None) -> None:
-    """原子写到 ``shell_presets.json``。任何 OSError 仅 stderr，不抛。"""
-    target = path if path is not None else _shell_presets_path()
+def save(presets: list[ShellPreset], path: Optional[Path] = None, store: DataStore = None) -> None:
+    """将预设列表序列化后写入 DataStore 内存缓存（新 API）或原子写到文件（旧 API，兼容）。
 
-    # 确保父目录存在（首次启动时 %LOCALAPPDATA%/MyTerm 可能还没建）
+    当 ``store`` 非 None 时走新 API：纯内存操作，不触发磁盘 I/O。
+    当 ``store`` 为 None 时走旧 API：原子写文件（tmp + os.replace）。
+    """
+    payload = {
+        "version": SCHEMA_VERSION,
+        "presets": [_serialize_one(p) for p in presets],
+    }
+
+    if store is not None:
+        from store.data_store import DataStore  # type guard
+        store.set_shell_presets_data(payload)
+        return
+
+    # 旧 API：原子写文件
+    target = path if path is not None else _shell_presets_path()
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         logger.warning("创建目录失败 %s: %s", target.parent, e)
         return
-
-    payload = {
-        "version": SCHEMA_VERSION,
-        "presets": [_serialize_one(p) for p in presets],
-    }
 
     tmp = target.with_suffix(target.suffix + ".tmp")
     try:
@@ -245,7 +266,6 @@ def save(presets: list[ShellPreset], path: Optional[Path] = None) -> None:
         os.replace(tmp, target)
     except OSError as e:
         logger.warning("写入失败 %s: %s", target, e)
-        # 清理可能残留的 .tmp
         try:
             if tmp.exists():
                 tmp.unlink()
