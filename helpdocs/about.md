@@ -4,9 +4,9 @@
 
 | 字段 | 内容 |
 |------|------|
-| 版本号 | 0.3.1 |
-| Commit ID | 503756332151de3ae7e3d3a57f3177ec448f3875 |
-| 构建时间 | 2026-06-29 |
+| 版本号 | 0.4.0 |
+| Commit ID | 92eeaec20d22145aa89d007bede07758c90ef3f8 |
+| 构建时间 | 2026-07-13 |
 | 运行系统 | Windows 10 / 11 (x64) |
 | Python 要求 | 3.10+（开发与发版用 3.14） |
 
@@ -28,7 +28,7 @@
 
 ## 数据存储位置
 
-- **配置 / 历史**：`%LOCALAPPDATA%\MyTerm\`
+- **数据库 / 配置 / 历史**：`%LOCALAPPDATA%\MyTerm\`（SQLite 数据库：`myterm.db`）
 - **粘贴图片缓存**：`%LOCALAPPDATA%\MyTerm\Cache\paste\`
 
 > 卸载时不会删除以上数据，保留用户历史。

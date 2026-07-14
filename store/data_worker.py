@@ -180,6 +180,7 @@ class DataWorker(QThread):
             return
         paths, presets, config = self._store.take_snapshot_for_flush()
         try:
+            self._conn.execute("BEGIN")
             if paths is not None:
                 self._conn.execute("DELETE FROM path_history")
                 for i, p in enumerate(paths):
@@ -202,5 +203,6 @@ class DataWorker(QThread):
             self._conn.commit()
             self.data_flushed.emit()
         except sqlite3.Error:
+            self._conn.rollback()
             logger.exception("flush 失败，下次重试")
             self._store.rollback_snapshot()
